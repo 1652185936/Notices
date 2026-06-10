@@ -1,5 +1,7 @@
 package com.yhx.notices.domain.richtext
 
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /** NoteContent ↔ JSON 序列化。容错：解析失败返回 null，由上层降级处理。 */

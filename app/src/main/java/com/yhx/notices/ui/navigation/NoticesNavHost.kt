@@ -15,11 +15,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.layout.padding
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.yhx.notices.ui.editor.NoteEditorScreen
 import com.yhx.notices.ui.notes.NotesListScreen
+import com.yhx.notices.ui.search.SearchScreen
 import com.yhx.notices.ui.settings.SettingsScreen
 import com.yhx.notices.ui.todo.TodoScreen
 
@@ -27,6 +31,7 @@ object Routes {
     const val NOTES = "notes"
     const val TODO = "todo"
     const val SETTINGS = "settings"
+    const val SEARCH = "search"
     const val EDITOR = "editor/{noteId}"
     fun editor(noteId: Long) = "editor/$noteId"
 }
@@ -77,11 +82,23 @@ fun NoticesNavHost() {
             composable(Routes.NOTES) {
                 NotesListScreen(
                     onOpenNote = { id -> navController.navigate(Routes.editor(id)) },
+                    onSearch = { navController.navigate(Routes.SEARCH) },
                 )
             }
             composable(Routes.TODO) { TodoScreen() }
             composable(Routes.SETTINGS) { SettingsScreen() }
-            // EDITOR 路由在 Phase 1 编辑器模块完成后接入
+            composable(Routes.SEARCH) {
+                SearchScreen(
+                    onOpenNote = { id -> navController.navigate(Routes.editor(id)) },
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable(
+                Routes.EDITOR,
+                arguments = listOf(navArgument("noteId") { type = NavType.StringType }),
+            ) {
+                NoteEditorScreen(onBack = { navController.popBackStack() })
+            }
         }
     }
 }
