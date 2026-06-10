@@ -2,6 +2,7 @@ package com.yhx.notices.data.local.dao
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.yhx.notices.data.local.entity.TodoEntity
@@ -42,4 +43,10 @@ interface TodoDao {
 
     @Query("UPDATE todos SET deletedAt = :now WHERE id = :id OR parentId = :id")
     suspend fun softDelete(id: Long, now: Long)
+
+    @Query("SELECT * FROM todos")
+    suspend fun getAllForBackup(): List<TodoEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertForBackup(todo: TodoEntity)
 }

@@ -1,7 +1,10 @@
 package com.yhx.notices.ui.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -11,10 +14,14 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -24,16 +31,36 @@ import com.yhx.notices.data.repository.ThemeMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
+fun SettingsScreen(
+    onOpenTrash: () -> Unit = {},
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val message by viewModel.message.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri -> uri?.let { viewModel.export(it) } }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let { viewModel.import(it) } }
+
+    LaunchedEffect(message) {
+        message?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearMessage()
+        }
+    }
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("我的") }) },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         Column(Modifier.fillMaxSize().padding(innerPadding)) {
             SectionTitle("外观")
             ThemeMode.entries.forEach { mode ->
-                androidx.compose.foundation.layout.Row(
+                Row(
                     Modifier
                         .fillMaxWidth()
                         .selectable(
@@ -53,8 +80,13 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
             }
             HorizontalDivider()
             SectionTitle("数据")
-            SettingRow("回收站") { /* TODO: 回收站页面 */ }
-            SettingRow("本地备份与导入") { /* TODO: 备份页面 */ }
+            SettingRow("回收站", onOpenTrash)
+            SettingRow("导出备份（.zip）") {
+                exportLauncher.launch("notices-backup-${System.currentTimeMillis()}.zip")
+            }
+            SettingRow("从备份恢复") {
+                importLauncher.launch(arrayOf("application/zip"))
+            }
             HorizontalDivider()
             SectionTitle("关于")
             SettingRow("记事本 · 华为笔记平替") {}

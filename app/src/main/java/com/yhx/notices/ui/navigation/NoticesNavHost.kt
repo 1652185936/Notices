@@ -26,12 +26,14 @@ import com.yhx.notices.ui.notes.NotesListScreen
 import com.yhx.notices.ui.search.SearchScreen
 import com.yhx.notices.ui.settings.SettingsScreen
 import com.yhx.notices.ui.todo.TodoScreen
+import com.yhx.notices.ui.trash.TrashScreen
 
 object Routes {
     const val NOTES = "notes"
     const val TODO = "todo"
     const val SETTINGS = "settings"
     const val SEARCH = "search"
+    const val TRASH = "trash"
     const val EDITOR = "editor/{noteId}"
     fun editor(noteId: Long) = "editor/$noteId"
 }
@@ -86,7 +88,12 @@ fun NoticesNavHost() {
                 )
             }
             composable(Routes.TODO) { TodoScreen() }
-            composable(Routes.SETTINGS) { SettingsScreen() }
+            composable(Routes.SETTINGS) {
+                SettingsScreen(onOpenTrash = { navController.navigate(Routes.TRASH) })
+            }
+            composable(Routes.TRASH) {
+                TrashScreen(onBack = { navController.popBackStack() })
+            }
             composable(Routes.SEARCH) {
                 SearchScreen(
                     onOpenNote = { id -> navController.navigate(Routes.editor(id)) },

@@ -52,6 +52,9 @@ class NoteEditorViewModel @Inject constructor(
     var canUndo by mutableStateOf(false); private set
     var canRedo by mutableStateOf(false); private set
 
+    var isPinned by mutableStateOf(false); private set
+    var isFavorite by mutableStateOf(false); private set
+
     private var loaded: Note? = null
     private var dirty = false
     private var saveJob: Job? = null
@@ -70,6 +73,8 @@ class NoteEditorViewModel @Inject constructor(
             if (note != null) {
                 loaded = note
                 title = note.title
+                isPinned = note.isPinned
+                isFavorite = note.isFavorite
                 blocks.clear()
                 blocks.addAll(note.content.blocks)
                 focusedBlockId = blocks.firstOrNull()?.id
@@ -280,6 +285,28 @@ class NoteEditorViewModel @Inject constructor(
             } else if (dirty) {
                 persist()
             }
+        }
+    }
+
+    fun togglePin() {
+        val note = loaded ?: return
+        isPinned = !isPinned
+        loaded = note.copy(isPinned = isPinned)
+        viewModelScope.launch { noteRepo.setPinned(listOf(noteId), isPinned) }
+    }
+
+    fun toggleFavorite() {
+        val note = loaded ?: return
+        isFavorite = !isFavorite
+        loaded = note.copy(isFavorite = isFavorite)
+        viewModelScope.launch { noteRepo.setFavorite(listOf(noteId), isFavorite) }
+    }
+
+    fun deleteNote(onDone: () -> Unit) {
+        viewModelScope.launch {
+            saveJob?.cancel()
+            noteRepo.moveToTrash(listOf(noteId))
+            onDone()
         }
     }
 

@@ -2,6 +2,7 @@ package com.yhx.notices.data.local.dao
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.yhx.notices.data.local.entity.NoteEntity
@@ -67,4 +68,10 @@ interface NoteDao {
 
     @Query("UPDATE notes SET folderId = :folderId WHERE id IN (:ids)")
     suspend fun moveToFolder(ids: List<Long>, folderId: Long?)
+
+    @Query("SELECT * FROM notes")
+    suspend fun getAllForBackup(): List<NoteEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertForBackup(note: NoteEntity)
 }

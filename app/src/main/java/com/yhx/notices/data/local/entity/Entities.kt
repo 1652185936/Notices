@@ -8,7 +8,9 @@ import androidx.room.PrimaryKey
 import com.yhx.notices.domain.model.AttachmentType
 import com.yhx.notices.domain.model.ReminderTarget
 import com.yhx.notices.domain.model.RepeatRule
+import kotlinx.serialization.Serializable
 
+@Serializable
 @Entity(tableName = "folders")
 data class FolderEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -32,6 +34,7 @@ data class FolderEntity(
         Index(value = ["isPinned", "updatedAt"]),
     ]
 )
+@Serializable
 data class NoteEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val folderId: Long? = null,
@@ -108,6 +111,7 @@ data class AttachmentEntity(
     tableName = "todos",
     indices = [Index("dueAt"), Index("parentId"), Index(value = ["isDone", "dueAt"])]
 )
+@Serializable
 data class TodoEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val parentId: Long? = null,

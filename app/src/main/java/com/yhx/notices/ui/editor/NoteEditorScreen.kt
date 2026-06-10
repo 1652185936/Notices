@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -90,6 +91,27 @@ fun NoteEditorScreen(
                     }
                     IconButton(onClick = viewModel::redo, enabled = viewModel.canRedo) {
                         Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "重做")
+                    }
+                    var menuOpen by remember { mutableStateOf(false) }
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "更多")
+                    }
+                    androidx.compose.material3.DropdownMenu(
+                        expanded = menuOpen,
+                        onDismissRequest = { menuOpen = false },
+                    ) {
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(if (viewModel.isPinned) "取消置顶" else "置顶") },
+                            onClick = { viewModel.togglePin(); menuOpen = false },
+                        )
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(if (viewModel.isFavorite) "取消收藏" else "收藏") },
+                            onClick = { viewModel.toggleFavorite(); menuOpen = false },
+                        )
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("删除") },
+                            onClick = { menuOpen = false; viewModel.deleteNote(onBack) },
+                        )
                     }
                 },
             )

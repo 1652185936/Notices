@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Embedded
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.yhx.notices.data.local.entity.FolderEntity
@@ -32,4 +33,10 @@ interface FolderDao {
 
     @Delete
     suspend fun delete(folder: FolderEntity)
+
+    @Query("SELECT * FROM folders")
+    suspend fun getAllForBackup(): List<FolderEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertForBackup(folder: FolderEntity)
 }
