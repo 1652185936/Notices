@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.yhx.notices.data.local.entity.TodoEntity
 import com.yhx.notices.data.repository.TodoRepository
+import com.yhx.notices.reminder.ReminderScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +25,7 @@ data class TodoGroups(
 @HiltViewModel
 class TodoViewModel @Inject constructor(
     private val repo: TodoRepository,
+    private val scheduler: ReminderScheduler,
 ) : ViewModel() {
 
     val groups: StateFlow<TodoGroups> = combine(
@@ -50,7 +52,14 @@ class TodoViewModel @Inject constructor(
     }
 
     fun delete(todo: TodoEntity) {
-        viewModelScope.launch { repo.delete(todo.id) }
+        viewModelScope.launch { scheduler.cancel(todo.id); repo.delete(todo.id) }
+    }
+
+    fun setReminder(todo: TodoEntity, triggerAt: Long) {
+        viewModelScope.launch {
+            repo.setDue(todo.id, triggerAt)
+            scheduler.schedule(todo.id, todo.content, triggerAt)
+        }
     }
 
     private fun endOfToday(): Long = Calendar.getInstance().apply {

@@ -16,6 +16,13 @@ class TodoRepository @Inject constructor(
     suspend fun add(content: String, dueAt: Long? = null): Long =
         todoDao.insert(TodoEntity(content = content, dueAt = dueAt))
 
+    suspend fun observeActiveOnce(): List<TodoEntity> = todoDao.activeWithDue()
+
+    suspend fun setDue(id: Long, dueAt: Long?) {
+        val todo = todoDao.getById(id) ?: return
+        todoDao.update(todo.copy(dueAt = dueAt))
+    }
+
     suspend fun setDone(id: Long, done: Boolean) =
         todoDao.setDone(id, done, if (done) System.currentTimeMillis() else null)
 

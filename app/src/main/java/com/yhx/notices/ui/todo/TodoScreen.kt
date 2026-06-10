@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -87,6 +88,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.group(
 
 @Composable
 private fun TodoRow(todo: TodoEntity, vm: TodoViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -108,5 +110,35 @@ private fun TodoRow(todo: TodoEntity, vm: TodoViewModel) {
                 )
             }
         }
+        if (!todo.isDone) {
+            IconButton(onClick = { pickDateTime(context) { vm.setReminder(todo, it) } }) {
+                Icon(Icons.Default.Alarm, contentDescription = "设提醒")
+            }
+        }
     }
+}
+
+private fun pickDateTime(context: android.content.Context, onPicked: (Long) -> Unit) {
+    val now = java.util.Calendar.getInstance()
+    android.app.DatePickerDialog(
+        context,
+        { _, year, month, day ->
+            android.app.TimePickerDialog(
+                context,
+                { _, hour, minute ->
+                    val cal = java.util.Calendar.getInstance().apply {
+                        set(year, month, day, hour, minute, 0)
+                        set(java.util.Calendar.MILLISECOND, 0)
+                    }
+                    onPicked(cal.timeInMillis)
+                },
+                now.get(java.util.Calendar.HOUR_OF_DAY),
+                now.get(java.util.Calendar.MINUTE),
+                true,
+            ).show()
+        },
+        now.get(java.util.Calendar.YEAR),
+        now.get(java.util.Calendar.MONTH),
+        now.get(java.util.Calendar.DAY_OF_MONTH),
+    ).show()
 }
