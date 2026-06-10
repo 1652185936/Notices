@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 蓝色笔形图标前景 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#007DFF"
+        android:pathData="M38,70 L62,34 a4,4 0 0 1 6.6,0 l4.4,6.6 a4,4 0 0 1 0,4.4 L49,81 l-12,3 z" />
+    <path
+        android:fillColor="#B3D9FF"
+        android:pathData="M40,68 l8,5.4 -11,2.6 z" />
+</vector>
