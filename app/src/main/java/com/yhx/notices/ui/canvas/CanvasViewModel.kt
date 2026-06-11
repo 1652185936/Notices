@@ -153,6 +153,29 @@ class CanvasViewModel @Inject constructor(
         markDirty()
     }
 
+    /** 在世界坐标 atY 处插入纵向空白：其下方元素整体下移 amount。 */
+    fun insertVerticalSpace(atY: Float, amount: Float) {
+        pushUndo()
+        for (i in elements.indices) {
+            val el = elements[i]
+            val minY = when (el) {
+                is StrokeElement -> { var m = Float.MAX_VALUE; var j = 1; while (j < el.points.size) { m = minOf(m, el.points[j]); j += 2 }; if (m == Float.MAX_VALUE) null else m }
+                is TextElement -> el.y
+                is ImageElement -> el.y
+                else -> null
+            }
+            if (minY != null && minY >= atY) {
+                elements[i] = when (el) {
+                    is StrokeElement -> el.copy(points = el.points.mapIndexed { idx, v -> if (idx % 2 == 1) v + amount else v })
+                    is TextElement -> el.copy(y = el.y + amount)
+                    is ImageElement -> el.copy(y = el.y + amount)
+                    else -> el
+                }
+            }
+        }
+        markDirty()
+    }
+
     fun deleteElements(ids: Set<String>) {
         if (ids.isEmpty()) return
         pushUndo()

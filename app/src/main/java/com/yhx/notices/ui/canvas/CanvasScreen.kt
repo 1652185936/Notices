@@ -61,6 +61,8 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.material.icons.filled.Height
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.IntOffset
@@ -237,6 +239,7 @@ fun CanvasScreen(
     val lassoPoints = remember { mutableStateListOf<Offset>() }
     var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var lassoMoving by remember { mutableStateOf(false) }
+    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
 
     val livePoints = remember { mutableStateListOf<Offset>() }
     val bitmaps = remember { mutableStateMapOf<Long, ImageBitmap?>() }
@@ -353,6 +356,10 @@ fun CanvasScreen(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                     )
                 },
+                onInsertSpace = {
+                    val cy = screenToWorld(Offset(canvasSize.width / 2f, canvasSize.height / 2f)).y
+                    viewModel.insertVerticalSpace(cy, 400f)
+                },
             )
         },
     ) { padding ->
@@ -361,6 +368,7 @@ fun CanvasScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .background(Color.White)
+                .onSizeChanged { canvasSize = it }
                 .pointerInput(tool) {
                     when (tool) {
                         CanvasTool.MOVE -> detectTransformGestures { centroid, pan, zoom, _ ->
@@ -659,6 +667,7 @@ private fun CanvasToolbar(
     onZoomOut: () -> Unit,
     onReset: () -> Unit,
     onImage: () -> Unit,
+    onInsertSpace: () -> Unit,
 ) {
     Surface(tonalElevation = 3.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
@@ -674,6 +683,7 @@ private fun CanvasToolbar(
                     )
                 }
                 IconButton(onClick = onImage) { Icon(Icons.Default.Image, "插入图片") }
+                IconButton(onClick = onInsertSpace) { Icon(Icons.Default.Height, "插入空白") }
             }
             Row(
                 Modifier.fillMaxWidth().padding(top = 6.dp),
