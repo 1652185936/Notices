@@ -146,16 +146,20 @@ class ExportManager @Inject constructor(
         content.elements.forEach { el ->
             when (el) {
                 is StrokeElement -> {
-                    val paint = Paint().apply {
-                        color = el.color; strokeWidth = el.width; isAntiAlias = true
-                        style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
+                    // 与画布端同一墨迹引擎：平滑变宽轮廓填充
+                    val n = el.points.size / 2
+                    val radii = if (el.widths.size == n) el.widths.map { it / 2f } else List(n) { el.width / 2f }
+                    val outline = com.yhx.notices.domain.canvas.InkGeometry.strokeOutline(
+                        el.points, radii, roundCaps = el.tool != "highlighter",
+                    )
+                    if (outline.size >= 6) {
+                        val paint = Paint().apply { color = el.color; isAntiAlias = true; style = Paint.Style.FILL }
+                        val path = android.graphics.Path()
+                        path.moveTo(outline[0], outline[1])
+                        var i = 2; while (i + 1 < outline.size) { path.lineTo(outline[i], outline[i + 1]); i += 2 }
+                        path.close()
+                        canvas.drawPath(path, paint)
                     }
-                    val path = android.graphics.Path()
-                    if (el.points.size >= 2) {
-                        path.moveTo(el.points[0], el.points[1])
-                        var i = 2; while (i + 1 < el.points.size) { path.lineTo(el.points[i], el.points[i + 1]); i += 2 }
-                    }
-                    canvas.drawPath(path, paint)
                 }
                 is ImageElement -> {
                     val path = attachmentRepo.resolvePath(el.attachmentId)?.absolutePath

@@ -77,6 +77,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.yhx.notices.domain.canvas.ImageElement
+import com.yhx.notices.domain.canvas.InkGeometry
 import com.yhx.notices.domain.canvas.StrokeElement
 import com.yhx.notices.domain.canvas.TextElement
 import com.yhx.notices.ui.icons.HwIcons
@@ -382,6 +383,10 @@ fun CanvasScreen(
     var opacity by remember { mutableStateOf(1f) }
 
     val livePoints = remember { mutableStateListOf<Offset>() }
+    val liveWidths = remember { mutableStateListOf<Float>() }
+    var eraseCursor by remember { mutableStateOf<Offset?>(null) }
+    // 已落墨笔迹的轮廓 Path 缓存（key 含首末点，套索平移后自动失效重建）
+    val inkCache = remember { HashMap<String, Path>() }
     val bitmaps = remember { mutableStateMapOf<Long, ImageBitmap?>() }
     val density = LocalDensity.current
 
@@ -541,11 +546,25 @@ fun CanvasScreen(
                                     change.consume()
                                 }
                             } else {
-                                livePoints.clear(); livePoints.add(screenToWorld(down.position))
+                                val baseW = strokeWidth(tool, width)
+                                var lastPos = down.position
+                                var lastTime = down.uptimeMillis
+                                var penW = baseW * 0.65f // 起笔渐入
+                                livePoints.clear(); liveWidths.clear()
+                                livePoints.add(screenToWorld(down.position)); liveWidths.add(penW)
+                                if (tool == CanvasTool.ERASER) eraseCursor = down.position
                                 down.consume()
                                 drag(down.id) { change ->
-                                    livePoints.add(screenToWorld(change.position)); change.consume()
+                                    val dist = (change.position - lastPos).getDistance()
+                                    val dt = (change.uptimeMillis - lastTime).coerceAtLeast(1L)
+                                    val target = baseW * widthFactor(tool, dist / dt, change.pressure, change.type)
+                                    penW += (target - penW) * 0.35f // 指数平滑防突变
+                                    lastPos = change.position; lastTime = change.uptimeMillis
+                                    livePoints.add(screenToWorld(change.position)); liveWidths.add(penW)
+                                    if (tool == CanvasTool.ERASER) eraseCursor = change.position
+                                    change.consume()
                                 }
+                                eraseCursor = null
                                 if (livePoints.size >= 1) {
                                     val flat = ArrayList<Float>(livePoints.size * 2)
                                     livePoints.forEach { flat.add(it.x); flat.add(it.y) }
@@ -559,17 +578,22 @@ fun CanvasScreen(
                                                 points = recognizeShape(flat) ?: flat,
                                             )
                                         )
-                                        else -> viewModel.addStroke(
-                                            StrokeElement(
-                                                tool = tool.name.lowercase(),
-                                                color = strokeColor(tool, color, opacity).toArgb(),
-                                                width = strokeWidth(tool, width),
-                                                points = flat,
+                                        else -> {
+                                            val ws = ArrayList(liveWidths)
+                                            if (tool != CanvasTool.HIGHLIGHTER) InkGeometry.taperTail(ws) // 收笔笔锋
+                                            viewModel.addStroke(
+                                                StrokeElement(
+                                                    tool = tool.name.lowercase(),
+                                                    color = strokeColor(tool, color, opacity).toArgb(),
+                                                    width = baseW,
+                                                    points = flat,
+                                                    widths = if (tool == CanvasTool.HIGHLIGHTER) emptyList() else ws,
+                                                )
                                             )
-                                        )
+                                        }
                                     }
                                 }
-                                livePoints.clear()
+                                livePoints.clear(); liveWidths.clear()
                             }
                         }
                     }
@@ -583,7 +607,7 @@ fun CanvasScreen(
                 }) {
                     viewModel.elements.forEach { el ->
                         when (el) {
-                            is StrokeElement -> drawStrokeElement(el)
+                            is StrokeElement -> drawStrokeElement(el, inkCache)
                             is ImageElement -> bitmaps[el.attachmentId]?.let { bmp ->
                                 drawImage(
                                     image = bmp,
@@ -646,17 +670,39 @@ fun CanvasScreen(
                             style = Stroke(2f / scale),
                         )
                     }
-                    // 实时预览笔迹
+                    // 实时预览笔迹（与落墨共用墨迹引擎，所见即所得）
                     if (livePoints.size >= 2) {
-                        val path = Path().apply {
-                            moveTo(livePoints.first().x, livePoints.first().y)
-                            for (i in 1 until livePoints.size) lineTo(livePoints[i].x, livePoints[i].y)
+                        when (tool) {
+                            CanvasTool.ERASER -> Unit // 橡皮用屏幕光标提示，不画白线
+                            CanvasTool.SHAPE -> {
+                                val path = Path().apply {
+                                    moveTo(livePoints.first().x, livePoints.first().y)
+                                    for (i in 1 until livePoints.size) lineTo(livePoints[i].x, livePoints[i].y)
+                                }
+                                drawPath(
+                                    path, color = color.copy(alpha = opacity),
+                                    style = Stroke(width, cap = StrokeCap.Round, join = StrokeJoin.Round),
+                                )
+                            }
+                            else -> {
+                                val flat = ArrayList<Float>(livePoints.size * 2)
+                                livePoints.forEach { flat.add(it.x); flat.add(it.y) }
+                                val radii = ArrayList<Float>(liveWidths.size)
+                                liveWidths.forEach { radii.add(it / 2f) }
+                                drawInkOutline(
+                                    flat, radii,
+                                    strokeColor(tool, color, opacity),
+                                    highlighter = tool == CanvasTool.HIGHLIGHTER,
+                                )
+                            }
                         }
-                        drawPath(
-                            path, color = strokeColor(tool, color, opacity),
-                            style = Stroke(strokeWidth(tool, width), cap = StrokeCap.Round, join = StrokeJoin.Round),
-                        )
                     }
+                }
+
+                // 橡皮光标（屏幕坐标）
+                eraseCursor?.let { p ->
+                    drawCircle(Color(0x14000000), radius = 20f, center = p)
+                    drawCircle(Color(0x4D000000), radius = 20f, center = p, style = Stroke(1.5f))
                 }
             }
 
@@ -749,7 +795,23 @@ fun CanvasScreen(
                 }
             }
 
-            if (showBrushPanel) {
+            // 笔刷面板：从锚点轻缩放+渐显弹出（华为式浮层动效）
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showBrushPanel,
+                enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(150)) +
+                    androidx.compose.animation.scaleIn(
+                        animationSpec = androidx.compose.animation.core.tween(180),
+                        initialScale = 0.9f,
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.15f, 0f),
+                    ),
+                exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(120)) +
+                    androidx.compose.animation.scaleOut(
+                        animationSpec = androidx.compose.animation.core.tween(140),
+                        targetScale = 0.94f,
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.15f, 0f),
+                    ),
+                modifier = Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 4.dp),
+            ) {
                 BrushPanel(
                     tool = tool,
                     onTool = { tool = it },
@@ -760,7 +822,6 @@ fun CanvasScreen(
                     opacity = opacity,
                     onOpacity = { opacity = it },
                     onClose = { showBrushPanel = false },
-                    modifier = Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 4.dp),
                 )
             }
         }
@@ -798,24 +859,71 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCanvasBackgroun
     }
 }
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokeElement(el: StrokeElement) {
-    if (el.points.size < 4) {
-        if (el.points.size >= 2) {
-            drawCircle(Color(el.color), radius = el.width / 2f, center = Offset(el.points[0], el.points[1]))
-        }
-        return
+/** 落墨渲染：轮廓填充 + Path 缓存（key 随平移变化自动失效）。 */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokeElement(
+    el: StrokeElement,
+    cache: HashMap<String, Path>,
+) {
+    if (el.points.size < 2) return
+    if (cache.size > 800) cache.clear()
+    val key = "${el.id}:${el.points.size}:${el.points.first()}:${el.points.last()}"
+    val path = cache.getOrPut(key) {
+        val n = el.points.size / 2
+        val radii = if (el.widths.size == n) el.widths.map { it / 2f } else List(n) { el.width / 2f }
+        val outline = InkGeometry.strokeOutline(el.points, radii, roundCaps = el.tool != "highlighter")
+        outlineToPath(outline)
     }
-    val path = Path().apply {
-        moveTo(el.points[0], el.points[1])
+    if (el.tool == "highlighter") {
+        drawPath(path, Color(el.color), blendMode = androidx.compose.ui.graphics.BlendMode.Multiply)
+    } else {
+        drawPath(path, Color(el.color))
+    }
+}
+
+/** 实时预览：直接生成轮廓并填充（不缓存）。 */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawInkOutline(
+    flat: List<Float>,
+    radii: List<Float>,
+    color: Color,
+    highlighter: Boolean,
+) {
+    val outline = InkGeometry.strokeOutline(flat, radii, roundCaps = !highlighter)
+    if (outline.size < 6) return
+    val path = outlineToPath(outline)
+    if (highlighter) drawPath(path, color, blendMode = androidx.compose.ui.graphics.BlendMode.Multiply)
+    else drawPath(path, color)
+}
+
+/** 闭合轮廓多边形 → 填充 Path。 */
+private fun outlineToPath(outline: FloatArray): Path = Path().apply {
+    if (outline.size >= 6) {
+        moveTo(outline[0], outline[1])
         var i = 2
-        while (i + 1 < el.points.size) {
-            lineTo(el.points[i], el.points[i + 1]); i += 2
+        while (i + 1 < outline.size) { lineTo(outline[i], outline[i + 1]); i += 2 }
+        close()
+    }
+}
+
+/** 笔速(px/ms)/压感 → 笔宽系数：秀丽笔大幅变宽出笔锋，铅笔微变，其余恒定。 */
+private fun widthFactor(
+    tool: CanvasTool,
+    speedPxPerMs: Float,
+    pressure: Float,
+    pointerType: PointerType,
+): Float = when (tool) {
+    CanvasTool.PEN -> {
+        if (pointerType == PointerType.Stylus && pressure > 0.01f && pressure <= 1.5f) {
+            0.45f + pressure.coerceIn(0f, 1f) * 1.05f // 真实压感优先
+        } else {
+            val s = (speedPxPerMs / 2.5f).coerceIn(0f, 1f)
+            1.35f - s * 0.8f // 慢笔粗、快笔细，模拟提按
         }
     }
-    drawPath(
-        path, color = Color(el.color),
-        style = Stroke(el.width, cap = StrokeCap.Round, join = StrokeJoin.Round),
-    )
+    CanvasTool.PENCIL -> {
+        val s = (speedPxPerMs / 2.5f).coerceIn(0f, 1f)
+        1.1f - s * 0.25f
+    }
+    else -> 1f
 }
 
 private fun strokeColor(tool: CanvasTool, color: Color, opacity: Float = 1f): Color = when (tool) {
@@ -1018,12 +1126,16 @@ private fun HwToolButton(
     onTool: (CanvasTool) -> Unit,
 ) {
     val selected = current == t
+    val bg by androidx.compose.animation.animateColorAsState(
+        if (selected) c.selBg else Color.Transparent,
+        androidx.compose.animation.core.tween(160), label = "toolBg",
+    )
     Box(
         Modifier
             .padding(horizontal = 2.dp)
             .size(38.dp)
             .clip(CircleShape)
-            .background(if (selected) c.selBg else Color.Transparent)
+            .background(bg)
             .androidx_clickable { onTool(t) },
         contentAlignment = Alignment.Center,
     ) {

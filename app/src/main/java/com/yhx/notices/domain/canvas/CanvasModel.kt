@@ -31,6 +31,7 @@ data class StrokeElement(
     val color: Int,              // ARGB
     val width: Float,
     val points: List<Float>,     // 扁平化的 x,y 序列，省空间
+    val widths: List<Float> = emptyList(), // 每点笔宽（笔速/压感动态宽），空 = 恒定 width
 ) : CanvasElement
 
 /** 画布上的文字框。 */
