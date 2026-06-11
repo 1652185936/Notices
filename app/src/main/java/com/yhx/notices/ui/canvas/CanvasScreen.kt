@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
@@ -73,7 +74,29 @@ import com.yhx.notices.domain.canvas.TextElement
 import kotlin.math.roundToInt
 
 enum class CanvasTool(val label: String) {
-    MOVE("移动"), PEN("钢笔"), PENCIL("铅笔"), HIGHLIGHTER("荧光笔"), ERASER("橡皮"), TEXT("文字")
+    MOVE("移动"), SELECT("选择"), PEN("钢笔"), PENCIL("铅笔"), HIGHLIGHTER("荧光笔"), ERASER("橡皮"), TEXT("文字")
+}
+
+/** 返回元素包围盒 [x, y, w, h]，笔迹不可选返回 null。 */
+private fun elementBounds(el: com.yhx.notices.domain.canvas.CanvasElement): FloatArray? = when (el) {
+    is ImageElement -> floatArrayOf(el.x, el.y, el.width, el.height)
+    is TextElement -> floatArrayOf(el.x, el.y, el.text.length.coerceAtLeast(2) * el.fontSize * 0.6f, el.fontSize * 1.4f)
+    else -> null
+}
+
+private fun hitTest(elements: List<com.yhx.notices.domain.canvas.CanvasElement>, w: Offset): String? {
+    for (el in elements.asReversed()) {
+        when (el) {
+            is ImageElement ->
+                if (w.x in el.x..(el.x + el.width) && w.y in el.y..(el.y + el.height)) return el.id
+            is TextElement -> {
+                val tw = el.text.length.coerceAtLeast(2) * el.fontSize * 0.6f
+                if (w.x in el.x..(el.x + tw) && w.y in el.y..(el.y + el.fontSize * 1.4f)) return el.id
+            }
+            else -> {}
+        }
+    }
+    return null
 }
 
 private val palette = listOf(
@@ -94,6 +117,8 @@ fun CanvasScreen(
     var color by remember { mutableStateOf(palette[0]) }
     var width by remember { mutableStateOf(6f) }
     var editingId by remember { mutableStateOf<String?>(null) }
+    var selectedId by remember { mutableStateOf<String?>(null) }
+    var draggingId by remember { mutableStateOf<String?>(null) }
 
     val livePoints = remember { mutableStateListOf<Offset>() }
     val bitmaps = remember { mutableStateMapOf<Long, ImageBitmap?>() }
@@ -236,6 +261,19 @@ fun CanvasScreen(
                             val w = screenToWorld(p)
                             editingId = viewModel.addText(w.x, w.y)
                         }
+                        CanvasTool.SELECT -> detectDragGestures(
+                            onDragStart = { p ->
+                                draggingId = hitTest(viewModel.elements, screenToWorld(p))
+                                selectedId = draggingId
+                            },
+                            onDrag = { change, drag ->
+                                change.consume()
+                                val id = draggingId
+                                if (id != null) viewModel.moveElement(id, drag.x / scale, drag.y / scale)
+                                else offset += drag
+                            },
+                            onDragEnd = { draggingId = null },
+                        )
                         else -> detectDragGestures(
                             onDragStart = { p ->
                                 livePoints.clear(); livePoints.add(screenToWorld(p))
@@ -296,6 +334,20 @@ fun CanvasScreen(
                             }
                         }
                     }
+                    // 选中元素高亮框
+                    selectedId?.let { sid ->
+                        viewModel.elements.firstOrNull { it.id == sid }?.let { el ->
+                            val b = elementBounds(el)
+                            if (b != null) {
+                                drawRect(
+                                    color = Color(0xFF007DFF),
+                                    topLeft = Offset(b[0], b[1]),
+                                    size = androidx.compose.ui.geometry.Size(b[2], b[3]),
+                                    style = Stroke(2f / scale),
+                                )
+                            }
+                        }
+                    }
                     // 实时预览笔迹
                     if (livePoints.size >= 2) {
                         val path = Path().apply {
@@ -308,6 +360,14 @@ fun CanvasScreen(
                         )
                     }
                 }
+            }
+
+            if (selectedId != null && tool == CanvasTool.SELECT) {
+                androidx.compose.material3.FloatingActionButton(
+                    onClick = { selectedId?.let { viewModel.deleteElement(it) }; selectedId = null },
+                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                ) { Icon(Icons.Default.Delete, "删除选中") }
             }
 
             // 正在编辑的文字框（覆盖在画布上，按世界→屏幕定位）
