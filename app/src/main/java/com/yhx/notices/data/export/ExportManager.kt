@@ -160,21 +160,12 @@ class ExportManager @Inject constructor(
                         var i = 2; while (i + 1 < outline.size) { path.lineTo(outline[i], outline[i + 1]); i += 2 }
                         path.close()
                         if (el.tool == "highlighter") {
-                            // 与屏幕端一致：Multiply 真叠色 + 两侧略深沉积边
-                            val a = Color.alpha(el.color)
+                            // 与屏幕端一致：干净的 Multiply 半透明平头色带（斜口由逐点宽实现，不描边）
                             val fill = Paint().apply {
                                 color = el.color; isAntiAlias = true; style = Paint.Style.FILL
                                 xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.MULTIPLY)
                             }
                             canvas.drawPath(path, fill)
-                            val edgeA = (a + 31).coerceAtMost(255) // +0.12 alpha
-                            val edge = Paint().apply {
-                                color = (el.color and 0x00FFFFFF) or (edgeA shl 24)
-                                isAntiAlias = true; style = Paint.Style.STROKE
-                                strokeWidth = (el.width * 0.08f).coerceIn(0.6f, 2.2f)
-                                xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.MULTIPLY)
-                            }
-                            canvas.drawPath(path, edge)
                         } else {
                             val paint = Paint().apply { color = el.color; isAntiAlias = true; style = Paint.Style.FILL }
                             canvas.drawPath(path, paint)

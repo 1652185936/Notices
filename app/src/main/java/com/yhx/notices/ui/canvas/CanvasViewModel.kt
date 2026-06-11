@@ -218,6 +218,8 @@ class CanvasViewModel @Inject constructor(
      */
     fun erasePixels(erasePoints: List<Float>, radius: Float) {
         if (erasePoints.size < 2) return
+        // 致密化步长：橡皮半径一半与 2f 取大者，保证擦除连续、断口干净不留残段
+        val dense = maxOf(2f, radius * 0.5f)
         var changed = false
         val newList = ArrayList<CanvasElement>(elements.size)
         for (el in elements) {
@@ -225,37 +227,54 @@ class CanvasViewModel @Inject constructor(
             val n = el.points.size / 2
             if (n == 0) { newList.add(el); continue }
             val hasWidths = el.widths.size == n
-            val reach = radius + el.width / 2f
-            // 逐点判断是否被橡皮路径覆盖
-            val erased = BooleanArray(n)
+            fun wAt(i: Int) = if (hasWidths) el.widths[i] else el.width
+            // 1) 原始稀疏点按 dense 步长重采样为致密点（逐点宽线性插值）
+            val dpx = ArrayList<Float>(n * 2)
+            val dpy = ArrayList<Float>(n * 2)
+            val dpw = ArrayList<Float>(n * 2)
+            if (n == 1) {
+                dpx.add(el.points[0]); dpy.add(el.points[1]); dpw.add(wAt(0))
+            } else {
+                for (s in 0 until n - 1) {
+                    val ax = el.points[s * 2]; val ay = el.points[s * 2 + 1]
+                    val bx = el.points[(s + 1) * 2]; val by = el.points[(s + 1) * 2 + 1]
+                    val wa = wAt(s); val wb = wAt(s + 1)
+                    val segLen = kotlin.math.hypot(bx - ax, by - ay)
+                    val steps = maxOf(1, kotlin.math.ceil(segLen / dense).toInt())
+                    val upto = if (s == n - 2) steps else steps - 1 // 末段含终点，其余跳过终点避免重复
+                    for (k in 0..upto) {
+                        val t = k / steps.toFloat()
+                        dpx.add(ax + (bx - ax) * t)
+                        dpy.add(ay + (by - ay) * t)
+                        dpw.add(wa + (wb - wa) * t)
+                    }
+                }
+            }
+            val dn = dpx.size
+            // 2) 致密点逐点判断是否被橡皮覆盖（含半笔宽余量）
+            val erased = BooleanArray(dn)
             var any = false
-            for (i in 0 until n) {
-                val px = el.points[i * 2]
-                val py = el.points[i * 2 + 1]
-                if (distToPolyline(px, py, erasePoints) <= reach) { erased[i] = true; any = true }
+            for (i in 0 until dn) {
+                val reach = radius + dpw[i] / 2f
+                if (distToPolyline(dpx[i], dpy[i], erasePoints) <= reach) { erased[i] = true; any = true }
             }
             if (!any) { newList.add(el); continue } // 未被擦到，原对象保留
             changed = true
-            // 把连续保留的点切成多段 run
+            // 3) 连续保留段重建为新笔迹
             var i = 0
-            while (i < n) {
+            while (i < dn) {
                 if (erased[i]) { i++; continue }
                 var j = i
-                while (j < n && !erased[j]) j++
-                val len = j - i
-                if (len >= 2) {
-                    val segPts = ArrayList<Float>(len * 2)
-                    val segWs = if (hasWidths) ArrayList<Float>(len) else null
-                    for (k in i until j) {
-                        segPts.add(el.points[k * 2])
-                        segPts.add(el.points[k * 2 + 1])
-                        segWs?.add(el.widths[k])
-                    }
+                while (j < dn && !erased[j]) j++
+                if (j - i >= 2) {
+                    val segPts = ArrayList<Float>((j - i) * 2)
+                    val segWs = ArrayList<Float>(j - i)
+                    for (k in i until j) { segPts.add(dpx[k]); segPts.add(dpy[k]); segWs.add(dpw[k]) }
                     newList.add(
                         el.copy(
                             id = com.yhx.notices.domain.canvas.newId(),
                             points = segPts,
-                            widths = segWs ?: emptyList(),
+                            widths = if (hasWidths) segWs else emptyList(),
                         )
                     )
                 }

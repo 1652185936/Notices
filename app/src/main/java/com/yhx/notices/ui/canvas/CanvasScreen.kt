@@ -15,7 +15,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -947,17 +946,66 @@ fun CanvasScreen(
                 .onSizeChanged { canvasSize = it }
                 .pointerInput(tool, palmBlock) {
                     when (tool) {
-                        CanvasTool.MOVE -> detectTransformGestures { centroid, pan, zoom, _ ->
-                            val newScale = (scale * zoom).coerceIn(0.1f, 10f)
-                            val worldUnder = Offset(
-                                (centroid.x - offset.x) / scale,
-                                (centroid.y - offset.y) / scale,
-                            )
-                            scale = newScale
-                            offset = Offset(
-                                centroid.x - worldUnder.x * newScale + pan.x,
-                                centroid.y - worldUnder.y * newScale + pan.y,
-                            )
+                        CanvasTool.MOVE -> awaitEachGesture {
+                            // 移动=选择/搬动工具：单指点中图片/文字/贴纸=选中（出手柄），拖动=搬动；
+                            // 单指在空白=平移画布；双指=缩放平移画布。
+                            val down = awaitFirstDown()
+                            val hitId = hitTest(viewModel.elements, screenToWorld(down.position))
+                            var dragDist = 0f
+                            var pushed = false
+                            var multi = false
+                            var childActive = false
+                            down.consume()
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val pressed = event.changes.filter { it.pressed }
+                                if (pressed.size >= 2) {
+                                    multi = true
+                                    while (true) {
+                                        val ev = awaitPointerEvent()
+                                        val zoom = ev.calculateZoom()
+                                        val pan = ev.calculatePan()
+                                        val centroid = ev.calculateCentroid()
+                                        if (centroid.isSpecified && (zoom != 1f || pan != Offset.Zero)) {
+                                            val newScale = (scale * zoom).coerceIn(0.1f, 10f)
+                                            val worldUnder = Offset(
+                                                (centroid.x - offset.x) / scale,
+                                                (centroid.y - offset.y) / scale,
+                                            )
+                                            scale = newScale
+                                            offset = Offset(
+                                                centroid.x - worldUnder.x * newScale + pan.x,
+                                                centroid.y - worldUnder.y * newScale + pan.y,
+                                            )
+                                        }
+                                        ev.changes.forEach { it.consume() }
+                                        if (ev.changes.none { it.pressed }) break
+                                    }
+                                    break
+                                }
+                                val ch = pressed.firstOrNull() ?: break
+                                if (ch.isConsumed) {
+                                    // 选中手柄（缩放/旋转/删除）正在接管，容器不介入也不改选择
+                                    childActive = true
+                                } else {
+                                    val dragv = ch.positionChange()
+                                    dragDist += dragv.getDistance()
+                                    if (hitId != null) {
+                                        if (dragv != Offset.Zero) {
+                                            if (!pushed) { viewModel.pushUndoOnce(); pushed = true }
+                                            viewModel.moveElement(hitId, dragv.x / scale, dragv.y / scale)
+                                        }
+                                    } else {
+                                        offset += dragv
+                                    }
+                                    ch.consume()
+                                }
+                                if (event.changes.none { it.pressed }) break
+                            }
+                            if (!multi && !childActive) {
+                                if (hitId != null) selectedId = hitId
+                                else if (dragDist < 8f) selectedId = null
+                            }
                         }
                         CanvasTool.TEXT -> detectTapGestures { p ->
                             val w = screenToWorld(p)
@@ -1241,7 +1289,7 @@ fun CanvasScreen(
             }
 
             // 选中单个 image/text/贴纸：带手柄的选择框（缩放/旋转/删除）+ 文字样式条
-            if (selectedId != null && tool == CanvasTool.SELECT) {
+            if (selectedId != null && tool == CanvasTool.MOVE) {
                 val sel = viewModel.elements.firstOrNull { it.id == selectedId }
                 if (sel is ImageElement || sel is TextElement) {
                     SelectionOverlay(
@@ -1753,16 +1801,9 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokeElement(
     val base = Color(el.color)
     val c = if (faded) base.copy(alpha = base.alpha * 0.25f) else base
     when (el.tool) {
-        "highlighter" -> {
-            // 半透明色带（Multiply 真叠色）+ 两侧略深的墨色沉积边
+        "highlighter" ->
+            // 干净的半透明平头色带（Multiply 真叠色）；斜口变宽由逐点宽实现，不再描边
             drawPath(paths[0], c, blendMode = androidx.compose.ui.graphics.BlendMode.Multiply)
-            val edge = c.copy(alpha = (c.alpha + 0.12f).coerceAtMost(1f))
-            drawPath(
-                paths[0], edge,
-                style = Stroke(width = (el.width * 0.08f).coerceIn(0.6f, 2.2f)),
-                blendMode = androidx.compose.ui.graphics.BlendMode.Multiply,
-            )
-        }
         "pencil" -> {
             // 石墨干介质：毛糙宽层淡 + 紧实芯层深
             drawPath(paths[0], c.copy(alpha = c.alpha * 0.45f))
@@ -1795,16 +1836,8 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawLiveInk(
 ) {
     val paths = buildInkPaths(tool.name.lowercase(), flat, radii)
     when (tool) {
-        CanvasTool.HIGHLIGHTER -> {
+        CanvasTool.HIGHLIGHTER ->
             drawPath(paths[0], color, blendMode = androidx.compose.ui.graphics.BlendMode.Multiply)
-            val maxR = radii.maxOrNull() ?: 1f
-            val edge = color.copy(alpha = (color.alpha + 0.12f).coerceAtMost(1f))
-            drawPath(
-                paths[0], edge,
-                style = Stroke(width = (maxR * 2f * 0.08f).coerceIn(0.6f, 2.2f)),
-                blendMode = androidx.compose.ui.graphics.BlendMode.Multiply,
-            )
-        }
         CanvasTool.PENCIL -> {
             drawPath(paths[0], color.copy(alpha = color.alpha * 0.45f))
             if (paths.size > 1) drawPath(paths[1], color.copy(alpha = color.alpha * 0.75f))
