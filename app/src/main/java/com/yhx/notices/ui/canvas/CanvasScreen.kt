@@ -26,10 +26,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -150,6 +149,9 @@ fun CanvasScreen(
                     )
                 },
                 actions = {
+                    IconButton(onClick = viewModel::cycleBackground) {
+                        Icon(Icons.Default.GridOn, contentDescription = "纸张模板")
+                    }
                     IconButton(onClick = viewModel::undo, enabled = viewModel.canUndo) {
                         Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "撤销")
                     }
@@ -222,6 +224,7 @@ fun CanvasScreen(
                 }
         ) {
             Canvas(Modifier.fillMaxSize()) {
+                drawCanvasBackground(viewModel.background, offset, scale)
                 withTransform({
                     translate(offset.x, offset.y)
                     scale(scale, scale, pivot = Offset.Zero)
@@ -283,6 +286,37 @@ fun CanvasScreen(
                             .offset { IntOffset(screenX.roundToInt(), screenY.roundToInt()) },
                     )
                 }
+            }
+        }
+    }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCanvasBackground(
+    style: String, offset: Offset, scale: Float,
+) {
+    if (style == "blank") return
+    val lineColor = Color(0x14000000)
+    val spacing = 48f * scale
+    if (spacing < 8f) return
+    when (style) {
+        "grid", "lines" -> {
+            var y = offset.y.mod(spacing)
+            while (y < size.height) {
+                drawLine(lineColor, Offset(0f, y), Offset(size.width, y), 1f); y += spacing
+            }
+            if (style == "grid") {
+                var x = offset.x.mod(spacing)
+                while (x < size.width) {
+                    drawLine(lineColor, Offset(x, 0f), Offset(x, size.height), 1f); x += spacing
+                }
+            }
+        }
+        "dots" -> {
+            var y = offset.y.mod(spacing)
+            while (y < size.height) {
+                var x = offset.x.mod(spacing)
+                while (x < size.width) { drawCircle(lineColor, 2f, Offset(x, y)); x += spacing }
+                y += spacing
             }
         }
     }

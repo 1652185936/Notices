@@ -13,6 +13,7 @@ import kotlinx.serialization.json.Json
 @Serializable
 data class CanvasContent(
     val version: Int = 1,
+    val background: String = "blank",   // blank / grid / lines / dots
     val elements: List<CanvasElement> = emptyList(),
 )
 

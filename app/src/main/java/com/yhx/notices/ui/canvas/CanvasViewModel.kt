@@ -36,6 +36,7 @@ class CanvasViewModel @Inject constructor(
     val elements: SnapshotStateList<CanvasElement> = mutableStateListOf()
 
     var canUndo by mutableStateOf(false); private set
+    var background by mutableStateOf("blank"); private set
 
     private val undoStack = ArrayDeque<List<CanvasElement>>()
     private var dirty = false
@@ -48,9 +49,16 @@ class CanvasViewModel @Inject constructor(
             val note = noteRepo.getNote(noteId)
             title = note?.title ?: ""
             val content = noteRepo.getCanvas(noteId)
+            background = content.background
             elements.clear()
             elements.addAll(content.elements)
         }
+    }
+
+    fun cycleBackground() {
+        val order = listOf("blank", "grid", "lines", "dots")
+        background = order[(order.indexOf(background) + 1) % order.size]
+        markDirty()
     }
 
     private fun pushUndo() {
@@ -146,7 +154,7 @@ class CanvasViewModel @Inject constructor(
     }
 
     private suspend fun persist() {
-        noteRepo.saveCanvas(noteId, title, CanvasContent(elements = elements.toList()))
+        noteRepo.saveCanvas(noteId, title, CanvasContent(background = background, elements = elements.toList()))
         dirty = false
     }
 
