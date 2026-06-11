@@ -100,6 +100,11 @@ enum class CanvasTool(val label: String) {
     MARKER("马克笔"), HIGHLIGHTER("荧光笔"), SHAPE("一笔成形"), ERASER("橡皮"), TEXT("文字")
 }
 
+/** 橡皮模式：整笔擦除（碰到整条删）/ 局部擦除（只擦经过的一段，从中间断开）。 */
+enum class EraserMode(val label: String) {
+    PIXEL("局部擦除"), STROKE("整笔擦除")
+}
+
 /** 射线法判断点是否在多边形（扁平 x,y 序列）内。 */
 private fun pointInPolygon(px: Float, py: Float, poly: List<Float>): Boolean {
     if (poly.size < 6) return false
@@ -517,14 +522,21 @@ fun CanvasScreen(
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     var showStickers by remember { mutableStateOf(false) }
     var showBrushPanel by remember { mutableStateOf(false) }
+    var showEraserPanel by remember { mutableStateOf(false) }
     var palmBlock by remember { mutableStateOf(false) }
     var minimapOn by remember { mutableStateOf(true) }
     var opacity by remember { mutableStateOf(1f) }
+    // 橡皮：默认局部（像素）擦除；橡皮大小（屏幕像素直径）
+    var eraserMode by remember { mutableStateOf(EraserMode.PIXEL) }
+    var eraserSize by remember { mutableStateOf(24f) }
 
-    // 选笔：换笔即切换并收起设置；再点已选中的笔 = 开关笔刷设置浮层
+    // 选笔：换笔即切换并收起设置；再点已选中的笔/橡皮 = 开关对应设置浮层
     val selectTool: (CanvasTool) -> Unit = { t ->
-        if (t == tool && t in penTools) showBrushPanel = !showBrushPanel
-        else { tool = t; showBrushPanel = false }
+        when {
+            t == CanvasTool.ERASER && tool == CanvasTool.ERASER -> showEraserPanel = !showEraserPanel
+            t == tool && t in penTools -> showBrushPanel = !showBrushPanel
+            else -> { tool = t; showBrushPanel = false; showEraserPanel = false }
+        }
     }
 
     val livePoints = remember { mutableStateListOf<Offset>() }
@@ -801,11 +813,14 @@ fun CanvasScreen(
                                     }
                                     if (tool == CanvasTool.ERASER) {
                                         eraseCursor = ch.position
-                                        // 实时命中灰显：先标记，抬手才删
-                                        val r = 20f / scale
-                                        val hits = viewModel.elements.filterIsInstance<StrokeElement>()
-                                            .filter { s -> s.id !in pendingErase && strokeHit(s, w.x, w.y, r) }
-                                        if (hits.isNotEmpty()) pendingErase = pendingErase + hits.map { it.id }
+                                        val r = (eraserSize / 2f) / scale
+                                        if (eraserMode == EraserMode.STROKE) {
+                                            // 整笔模式：实时命中灰显，先标记，抬手才删
+                                            val hits = viewModel.elements.filterIsInstance<StrokeElement>()
+                                                .filter { s -> s.id !in pendingErase && strokeHit(s, w.x, w.y, r) }
+                                            if (hits.isNotEmpty()) pendingErase = pendingErase + hits.map { it.id }
+                                        }
+                                        // 局部模式：不灰显整条，仅靠 livePoints 累积橡皮路径，抬手再切割
                                     }
                                 }
                                 ch.consume()
@@ -817,7 +832,13 @@ fun CanvasScreen(
                                 livePoints.forEach { flat.add(it.x); flat.add(it.y) }
                                 when (tool) {
                                     CanvasTool.ERASER -> {
-                                        if (pendingErase.isNotEmpty()) viewModel.deleteElements(pendingErase)
+                                        if (eraserMode == EraserMode.STROKE) {
+                                            if (pendingErase.isNotEmpty()) viewModel.deleteElements(pendingErase)
+                                        } else {
+                                            // 局部擦除：用橡皮路径把笔迹从中间断开成多段
+                                            val r = (eraserSize / 2f) / scale
+                                            viewModel.erasePixels(flat, r)
+                                        }
                                         pendingErase = emptySet()
                                     }
                                     CanvasTool.SHAPE -> viewModel.addStroke(
@@ -941,10 +962,11 @@ fun CanvasScreen(
                     }
                 }
 
-                // 橡皮光标（屏幕坐标）
+                // 橡皮光标（屏幕坐标），半径随橡皮大小
                 eraseCursor?.let { p ->
-                    drawCircle(Color(0x14000000), radius = 20f, center = p)
-                    drawCircle(Color(0x4D000000), radius = 20f, center = p, style = Stroke(1.5f))
+                    val cr = eraserSize / 2f
+                    drawCircle(Color(0x14000000), radius = cr, center = p)
+                    drawCircle(Color(0x4D000000), radius = cr, center = p, style = Stroke(1.5f))
                 }
             }
 
@@ -1139,6 +1161,99 @@ fun CanvasScreen(
                     onClose = { showBrushPanel = false },
                 )
             }
+
+            // 橡皮设置浮层：与笔刷浮层同区域，内容精简（模式二选一 + 橡皮大小）
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showEraserPanel,
+                enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(150)) +
+                    androidx.compose.animation.scaleIn(
+                        animationSpec = androidx.compose.animation.core.tween(180),
+                        initialScale = 0.9f,
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f),
+                    ),
+                exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(120)) +
+                    androidx.compose.animation.scaleOut(
+                        animationSpec = androidx.compose.animation.core.tween(140),
+                        targetScale = 0.94f,
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f),
+                    ),
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
+            ) {
+                EraserPanel(
+                    mode = eraserMode,
+                    onMode = { eraserMode = it },
+                    size = eraserSize,
+                    onSize = { eraserSize = it },
+                    onClose = { showEraserPanel = false },
+                )
+            }
+        }
+    }
+}
+
+/* ====================== 橡皮设置浮层 ====================== */
+
+@Composable
+private fun EraserPanel(
+    mode: EraserMode,
+    onMode: (EraserMode) -> Unit,
+    size: Float,
+    onSize: (Float) -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val c = hwBarColors()
+    Surface(
+        modifier = modifier.width(280.dp),
+        color = if (isSystemInDarkTheme()) Color(0xFF2A2C2E) else Color.White,
+        shape = RoundedCornerShape(18.dp),
+        shadowElevation = 16.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x14000000)),
+    ) {
+        Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("橡皮", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Icon(
+                    HwIcons.Close, "关闭", tint = c.ink,
+                    modifier = Modifier.size(30.dp).clip(CircleShape).androidx_clickable(onClose).padding(5.dp),
+                )
+            }
+            // 模式二选一分段控件
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (isSystemInDarkTheme()) Color(0xFF35373B) else Color(0xFFF1F3F5))
+                    .padding(3.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                EraserMode.entries.forEach { m ->
+                    val selected = m == mode
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (selected) Color(0xFF007DFF) else Color.Transparent)
+                            .androidx_clickable { onMode(m) }
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            m.label,
+                            fontSize = 13.sp,
+                            color = if (selected) Color.White else c.ink,
+                        )
+                    }
+                }
+            }
+            // 橡皮大小
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 12.dp)) {
+                Text("橡皮大小", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.weight(1f))
+                Text("${size.roundToInt()}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            HwSlider(value = size, onValue = onSize, range = 8f..60f)
         }
     }
 }

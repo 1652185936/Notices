@@ -164,6 +164,64 @@ class CanvasViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 局部（像素）擦除：沿橡皮路径 erasePoints（扁平 x,y），把每条笔迹被覆盖的点切除，
+     * 连续保留段各生成一个新 StrokeElement（同步切片 points 与 widths），从中间断开成多段。
+     * 完全没被擦到的笔迹保持原对象不动（避免缓存抖动）；整条擦光的直接消失。整次拖动一次撤销。
+     */
+    fun erasePixels(erasePoints: List<Float>, radius: Float) {
+        if (erasePoints.size < 2) return
+        var changed = false
+        val newList = ArrayList<CanvasElement>(elements.size)
+        for (el in elements) {
+            if (el !is StrokeElement) { newList.add(el); continue }
+            val n = el.points.size / 2
+            if (n == 0) { newList.add(el); continue }
+            val hasWidths = el.widths.size == n
+            val reach = radius + el.width / 2f
+            // 逐点判断是否被橡皮路径覆盖
+            val erased = BooleanArray(n)
+            var any = false
+            for (i in 0 until n) {
+                val px = el.points[i * 2]
+                val py = el.points[i * 2 + 1]
+                if (distToPolyline(px, py, erasePoints) <= reach) { erased[i] = true; any = true }
+            }
+            if (!any) { newList.add(el); continue } // 未被擦到，原对象保留
+            changed = true
+            // 把连续保留的点切成多段 run
+            var i = 0
+            while (i < n) {
+                if (erased[i]) { i++; continue }
+                var j = i
+                while (j < n && !erased[j]) j++
+                val len = j - i
+                if (len >= 2) {
+                    val segPts = ArrayList<Float>(len * 2)
+                    val segWs = if (hasWidths) ArrayList<Float>(len) else null
+                    for (k in i until j) {
+                        segPts.add(el.points[k * 2])
+                        segPts.add(el.points[k * 2 + 1])
+                        segWs?.add(el.widths[k])
+                    }
+                    newList.add(
+                        el.copy(
+                            id = com.yhx.notices.domain.canvas.newId(),
+                            points = segPts,
+                            widths = segWs ?: emptyList(),
+                        )
+                    )
+                }
+                i = j
+            }
+        }
+        if (changed) {
+            pushUndo()
+            elements.clear(); elements.addAll(newList)
+            markDirty()
+        }
+    }
+
     /** 套索：按 id 集合整体平移（笔迹平移所有点）。 */
     fun moveElementsBy(ids: Set<String>, dx: Float, dy: Float) {
         if (ids.isEmpty()) return
@@ -345,6 +403,30 @@ class CanvasViewModel @Inject constructor(
         val maxW = 900f
         val scale = if (w > maxW) maxW / w else 1f
         return w * scale to h * scale
+    }
+
+    /** 点 (px,py) 到橡皮路径（扁平 x,y 折线）的最近距离；单点路径退化为点距。 */
+    private fun distToPolyline(px: Float, py: Float, poly: List<Float>): Float {
+        if (poly.size < 2) return Float.MAX_VALUE
+        if (poly.size == 2) {
+            val dx = px - poly[0]; val dy = py - poly[1]
+            return kotlin.math.hypot(dx, dy)
+        }
+        var best = Float.MAX_VALUE
+        var i = 0
+        while (i + 3 < poly.size) {
+            val ax = poly[i]; val ay = poly[i + 1]
+            val bx = poly[i + 2]; val by = poly[i + 3]
+            val vx = bx - ax; val vy = by - ay
+            val len2 = vx * vx + vy * vy
+            val t = if (len2 <= 1e-6f) 0f else (((px - ax) * vx + (py - ay) * vy) / len2).coerceIn(0f, 1f)
+            val dx = px - (ax + vx * t)
+            val dy = py - (ay + vy * t)
+            val d = kotlin.math.hypot(dx, dy)
+            if (d < best) best = d
+            i += 2
+        }
+        return best
     }
 
     private fun markDirty() {
