@@ -26,6 +26,9 @@ interface TodoDao {
     @Query("SELECT * FROM todos WHERE deletedAt IS NULL AND parentId = :parentId ORDER BY sortOrder")
     fun observeChildren(parentId: Long): Flow<List<TodoEntity>>
 
+    @Query("SELECT * FROM todos WHERE deletedAt IS NULL AND parentId IS NOT NULL ORDER BY sortOrder, createdAt")
+    fun observeSubtasks(): Flow<List<TodoEntity>>
+
     @Query("SELECT * FROM todos WHERE deletedAt IS NULL AND isDone = 0 AND dueAt IS NOT NULL")
     suspend fun activeWithDue(): List<TodoEntity>
 
