@@ -41,6 +41,9 @@ class CanvasViewModel @Inject constructor(
     var canRedo by mutableStateOf(false); private set
     var background by mutableStateOf("blank"); private set
 
+    /** 内容修订号：元素/纸张任何变化 +1，供渲染层缓存失效判断。 */
+    var revision by mutableStateOf(0L); private set
+
     private val undoStack = ArrayDeque<List<CanvasElement>>()
     private val redoStack = ArrayDeque<List<CanvasElement>>()
     private var dirty = false
@@ -56,6 +59,7 @@ class CanvasViewModel @Inject constructor(
             background = content.background
             elements.clear()
             elements.addAll(content.elements)
+            revision++
         }
     }
 
@@ -280,6 +284,7 @@ class CanvasViewModel @Inject constructor(
     }
 
     private fun markDirty() {
+        revision++
         dirty = true
         saveJob?.cancel()
         saveJob = viewModelScope.launch {

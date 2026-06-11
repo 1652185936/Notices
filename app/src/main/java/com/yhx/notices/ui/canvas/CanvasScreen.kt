@@ -30,6 +30,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -57,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
@@ -83,6 +87,7 @@ import com.yhx.notices.domain.canvas.InkGeometry
 import com.yhx.notices.domain.canvas.StrokeElement
 import com.yhx.notices.domain.canvas.TextElement
 import com.yhx.notices.ui.icons.HwIcons
+import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -396,6 +401,10 @@ fun CanvasScreen(
     val livePoints = remember { mutableStateListOf<Offset>() }
     val liveWidths = remember { mutableStateListOf<Float>() }
     var eraseCursor by remember { mutableStateOf<Offset?>(null) }
+    var pendingErase by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // 分层渲染：已落墨内容烘焙为位图（书写时每帧只画位图+当前一笔）
+    var inkLayer by remember { mutableStateOf<Pair<ImageBitmap, BakeStamp>?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     // 已落墨笔迹的轮廓 Path 缓存（key 含首末点，套索平移后自动失效重建；铅笔为双层）
     val inkCache = remember { HashMap<String, List<Path>>() }
     val bitmaps = remember { mutableStateMapOf<Long, ImageBitmap?>() }
@@ -415,6 +424,35 @@ fun CanvasScreen(
                 }
             }
         }
+    }
+
+    // —— 烘焙基底层：内容/变换稳定 60ms 后重烘，期间矢量兜底 ——
+    val bakeStamp = BakeStamp(
+        revision = viewModel.revision,
+        offsetX = offset.x, offsetY = offset.y, scale = scale,
+        width = canvasSize.width, height = canvasSize.height,
+        background = viewModel.background,
+        editingId = editingId,
+        loadedImages = bitmaps.count { it.value != null },
+        fading = pendingErase.size,
+    )
+    androidx.compose.runtime.LaunchedEffect(bakeStamp) {
+        if (canvasSize.width <= 0 || canvasSize.height <= 0) return@LaunchedEffect
+        kotlinx.coroutines.delay(60)
+        val bmp = ImageBitmap(canvasSize.width, canvasSize.height)
+        androidx.compose.ui.graphics.drawscope.CanvasDrawScope().draw(
+            density,
+            androidx.compose.ui.unit.LayoutDirection.Ltr,
+            androidx.compose.ui.graphics.Canvas(bmp),
+            androidx.compose.ui.geometry.Size(canvasSize.width.toFloat(), canvasSize.height.toFloat()),
+        ) {
+            drawRect(Color.White)
+            drawCommittedWorld(
+                viewModel.elements.toList(), bitmaps, viewModel.background,
+                offset, scale, editingId, inkCache, pendingErase,
+            )
+        }
+        inkLayer = bmp to bakeStamp
     }
 
     val imagePicker = rememberLauncherForActivityResult(
@@ -543,98 +581,125 @@ fun CanvasScreen(
                         )
                         else -> awaitEachGesture {
                             val down = awaitFirstDown()
-                            if (palmBlock && down.type != PointerType.Stylus) {
-                                // 防误触开启：手指只平移画布，仅手写笔可书写
-                                drag(down.id) { change ->
-                                    offset += change.positionChange()
-                                    change.consume()
-                                }
-                            } else {
-                                val baseW = strokeWidth(tool, width)
-                                var lastPos = down.position
-                                var lastTime = down.uptimeMillis
-                                var penW = baseW * 0.65f // 起笔渐入
+                            val fingerPansOnly = palmBlock && down.type != PointerType.Stylus
+                            val baseW = strokeWidth(tool, width)
+                            var lastPos = down.position
+                            var lastTime = down.uptimeMillis
+                            var penW = baseW * 0.65f // 起笔渐入
+                            var multiTouch = false
+                            if (!fingerPansOnly) {
                                 livePoints.clear(); liveWidths.clear()
                                 livePoints.add(screenToWorld(down.position)); liveWidths.add(penW)
                                 if (tool == CanvasTool.ERASER) eraseCursor = down.position
-                                down.consume()
-                                drag(down.id) { change ->
-                                    val dist = (change.position - lastPos).getDistance()
-                                    val dt = (change.uptimeMillis - lastTime).coerceAtLeast(1L)
-                                    val target = baseW * widthFactor(tool, dist / dt, change.pressure, change.type)
-                                    penW += (target - penW) * 0.35f // 指数平滑防突变
-                                    lastPos = change.position; lastTime = change.uptimeMillis
-                                    livePoints.add(screenToWorld(change.position)); liveWidths.add(penW)
-                                    if (tool == CanvasTool.ERASER) eraseCursor = change.position
-                                    change.consume()
-                                }
-                                eraseCursor = null
-                                if (livePoints.size >= 1) {
-                                    val flat = ArrayList<Float>(livePoints.size * 2)
-                                    livePoints.forEach { flat.add(it.x); flat.add(it.y) }
-                                    when (tool) {
-                                        CanvasTool.ERASER -> viewModel.eraseStrokes(flat, 20f / scale)
-                                        CanvasTool.SHAPE -> viewModel.addStroke(
-                                            StrokeElement(
-                                                tool = "pen",
-                                                color = color.copy(alpha = opacity).toArgb(),
-                                                width = width,
-                                                points = recognizeShape(flat) ?: flat,
+                            }
+                            down.consume()
+                            // 单指书写事件环：第二指落下立即转双指缩放平移
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val pressed = event.changes.filter { it.pressed }
+                                if (pressed.size >= 2) {
+                                    multiTouch = true
+                                    livePoints.clear(); liveWidths.clear()
+                                    eraseCursor = null; pendingErase = emptySet()
+                                    while (true) {
+                                        val ev = awaitPointerEvent()
+                                        val zoom = ev.calculateZoom()
+                                        val pan = ev.calculatePan()
+                                        val centroid = ev.calculateCentroid()
+                                        if (centroid.isSpecified && (zoom != 1f || pan != Offset.Zero)) {
+                                            val newScale = (scale * zoom).coerceIn(0.1f, 10f)
+                                            val worldUnder = Offset(
+                                                (centroid.x - offset.x) / scale,
+                                                (centroid.y - offset.y) / scale,
                                             )
-                                        )
-                                        else -> {
-                                            // 马克笔/荧光笔为恒宽方杆笔，不存逐点宽；书写类笔收笔出锋
-                                            val constantWidth = tool == CanvasTool.HIGHLIGHTER || tool == CanvasTool.MARKER
-                                            val ws = ArrayList(liveWidths)
-                                            if (!constantWidth) InkGeometry.taperTail(ws)
-                                            viewModel.addStroke(
-                                                StrokeElement(
-                                                    tool = tool.name.lowercase(),
-                                                    color = strokeColor(tool, color, opacity).toArgb(),
-                                                    width = baseW,
-                                                    points = flat,
-                                                    widths = if (constantWidth) emptyList() else ws,
-                                                )
+                                            scale = newScale
+                                            offset = Offset(
+                                                centroid.x - worldUnder.x * newScale + pan.x,
+                                                centroid.y - worldUnder.y * newScale + pan.y,
                                             )
                                         }
+                                        ev.changes.forEach { it.consume() }
+                                        if (ev.changes.none { it.pressed }) break
+                                    }
+                                    break
+                                }
+                                val ch = pressed.firstOrNull() ?: break
+                                if (fingerPansOnly) {
+                                    offset += ch.positionChange()
+                                } else {
+                                    val dist = (ch.position - lastPos).getDistance()
+                                    val dt = (ch.uptimeMillis - lastTime).coerceAtLeast(1L)
+                                    val target = baseW * widthFactor(tool, dist / dt, ch.pressure, ch.type)
+                                    penW += (target - penW) * 0.35f // 指数平滑防突变
+                                    lastPos = ch.position; lastTime = ch.uptimeMillis
+                                    val w = screenToWorld(ch.position)
+                                    livePoints.add(w); liveWidths.add(penW)
+                                    if (tool == CanvasTool.ERASER) {
+                                        eraseCursor = ch.position
+                                        // 实时命中灰显：先标记，抬手才删
+                                        val r = 20f / scale
+                                        val hits = viewModel.elements.filterIsInstance<StrokeElement>()
+                                            .filter { s -> s.id !in pendingErase && strokeHit(s, w.x, w.y, r) }
+                                        if (hits.isNotEmpty()) pendingErase = pendingErase + hits.map { it.id }
                                     }
                                 }
-                                livePoints.clear(); liveWidths.clear()
+                                ch.consume()
+                                if (event.changes.none { it.pressed }) break
                             }
+                            eraseCursor = null
+                            if (!multiTouch && !fingerPansOnly && livePoints.size >= 1) {
+                                val flat = ArrayList<Float>(livePoints.size * 2)
+                                livePoints.forEach { flat.add(it.x); flat.add(it.y) }
+                                when (tool) {
+                                    CanvasTool.ERASER -> {
+                                        if (pendingErase.isNotEmpty()) viewModel.deleteElements(pendingErase)
+                                        pendingErase = emptySet()
+                                    }
+                                    CanvasTool.SHAPE -> viewModel.addStroke(
+                                        StrokeElement(
+                                            tool = "pen",
+                                            color = color.copy(alpha = opacity).toArgb(),
+                                            width = width,
+                                            points = recognizeShape(flat) ?: flat,
+                                        )
+                                    )
+                                    else -> {
+                                        // 马克笔/荧光笔为恒宽方杆笔，不存逐点宽；书写类笔收笔出锋
+                                        val constantWidth = tool == CanvasTool.HIGHLIGHTER || tool == CanvasTool.MARKER
+                                        val ws = ArrayList(liveWidths)
+                                        if (!constantWidth) InkGeometry.taperTail(ws)
+                                        viewModel.addStroke(
+                                            StrokeElement(
+                                                tool = tool.name.lowercase(),
+                                                color = strokeColor(tool, color, opacity).toArgb(),
+                                                width = baseW,
+                                                points = flat,
+                                                widths = if (constantWidth) emptyList() else ws,
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                            livePoints.clear(); liveWidths.clear()
                         }
                     }
                 }
         ) {
             Canvas(Modifier.fillMaxSize()) {
-                drawCanvasBackground(viewModel.background, offset, scale)
+                // 基底：位图命中 → 一次 drawImage；未命中（平移/缩放/刚改动）→ 矢量兜底
+                val layer = inkLayer
+                if (layer != null && layer.second == bakeStamp) {
+                    drawImage(layer.first)
+                } else {
+                    drawCommittedWorld(
+                        viewModel.elements, bitmaps, viewModel.background,
+                        offset, scale, editingId, inkCache, pendingErase,
+                    )
+                }
                 withTransform({
                     translate(offset.x, offset.y)
                     scale(scale, scale, pivot = Offset.Zero)
                 }) {
-                    viewModel.elements.forEach { el ->
-                        when (el) {
-                            is StrokeElement -> drawStrokeElement(el, inkCache)
-                            is ImageElement -> bitmaps[el.attachmentId]?.let { bmp ->
-                                drawImage(
-                                    image = bmp,
-                                    srcOffset = IntOffset.Zero,
-                                    srcSize = IntSize(bmp.width, bmp.height),
-                                    dstOffset = IntOffset(el.x.roundToInt(), el.y.roundToInt()),
-                                    dstSize = IntSize(el.width.roundToInt(), el.height.roundToInt()),
-                                )
-                            }
-                            is TextElement -> if (el.id != editingId && el.text.isNotEmpty()) {
-                                val paint = android.graphics.Paint().apply {
-                                    this.color = el.color
-                                    textSize = el.fontSize
-                                    isAntiAlias = true
-                                }
-                                drawContext.canvas.nativeCanvas.drawText(
-                                    el.text, el.x, el.y + el.fontSize, paint,
-                                )
-                            }
-                        }
-                    }
                     // 选中元素高亮框
                     selectedId?.let { sid ->
                         viewModel.elements.firstOrNull { it.id == sid }?.let { el ->
@@ -731,6 +796,78 @@ fun CanvasScreen(
                             )
                         },
                     )
+                }
+            }
+
+            // 内容完全跑出视野时浮出「回到内容」，点击平滑飞回适配
+            val contentBounds = androidx.compose.runtime.remember(viewModel.revision) {
+                var acc: FloatArray? = null
+                viewModel.elements.forEach { el ->
+                    elementBox(el)?.let { e ->
+                        acc = acc?.let {
+                            floatArrayOf(
+                                minOf(it[0], e[0]), minOf(it[1], e[1]),
+                                maxOf(it[2], e[2]), maxOf(it[3], e[3]),
+                            )
+                        } ?: e
+                    }
+                }
+                acc
+            }
+            val contentOffscreen = contentBounds?.let { cb ->
+                if (canvasSize.width <= 0) false else {
+                    val tl = screenToWorld(Offset.Zero)
+                    val br = screenToWorld(Offset(canvasSize.width.toFloat(), canvasSize.height.toFloat()))
+                    cb[2] < tl.x || cb[0] > br.x || cb[3] < tl.y || cb[1] > br.y
+                }
+            } ?: false
+            if (contentOffscreen) {
+                Surface(
+                    onClick = {
+                        val cb = contentBounds ?: return@Surface
+                        scope.launch {
+                            val margin = 120f
+                            val cw = (cb[2] - cb[0]) + margin * 2
+                            val chh = (cb[3] - cb[1]) + margin * 2
+                            val targetScale = minOf(
+                                canvasSize.width / cw, canvasSize.height / chh, 1f,
+                            ).coerceAtLeast(0.1f)
+                            val cx = (cb[0] + cb[2]) / 2f
+                            val cy = (cb[1] + cb[3]) / 2f
+                            val targetOffset = Offset(
+                                canvasSize.width / 2f - cx * targetScale,
+                                canvasSize.height / 2f - cy * targetScale,
+                            )
+                            val sO = offset
+                            val sS = scale
+                            androidx.compose.animation.core.animate(
+                                0f, 1f,
+                                animationSpec = androidx.compose.animation.core.tween(380),
+                            ) { t, _ ->
+                                scale = sS + (targetScale - sS) * t
+                                offset = Offset(
+                                    sO.x + (targetOffset.x - sO.x) * t,
+                                    sO.y + (targetOffset.y - sO.y) * t,
+                                )
+                            }
+                        }
+                    },
+                    shape = RoundedCornerShape(18.dp),
+                    color = Color(0xF2FFFFFF),
+                    shadowElevation = 8.dp,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x14000000)),
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 14.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+                    ) {
+                        Icon(HwIcons.NoteBadge, null, tint = Color(0xFF007DFF), modifier = Modifier.size(16.dp))
+                        Text(
+                            "回到内容", fontSize = 13.sp, color = Color(0xFF007DFF),
+                            modifier = Modifier.padding(start = 6.dp),
+                        )
+                    }
                 }
             }
 
@@ -875,10 +1012,95 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCanvasBackgroun
     }
 }
 
+/** 基底层渲染快照参数：任一字段变化即重烘焙。 */
+private data class BakeStamp(
+    val revision: Long,
+    val offsetX: Float,
+    val offsetY: Float,
+    val scale: Float,
+    val width: Int,
+    val height: Int,
+    val background: String,
+    val editingId: String?,
+    val loadedImages: Int,
+    val fading: Int,
+)
+
+/** 已落墨世界：纸张背景 + 全部元素（供实时绘制兜底与位图烘焙共用）。 */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCommittedWorld(
+    elements: List<com.yhx.notices.domain.canvas.CanvasElement>,
+    bitmaps: Map<Long, ImageBitmap?>,
+    background: String,
+    offset: Offset,
+    scale: Float,
+    editingId: String?,
+    inkCache: HashMap<String, List<Path>>,
+    pendingErase: Set<String>,
+) {
+    drawCanvasBackground(background, offset, scale)
+    withTransform({
+        translate(offset.x, offset.y)
+        scale(scale, scale, pivot = Offset.Zero)
+    }) {
+        elements.forEach { el ->
+            val faded = el.id in pendingErase
+            when (el) {
+                is StrokeElement -> drawStrokeElement(el, inkCache, faded)
+                is ImageElement -> bitmaps[el.attachmentId]?.let { bmp ->
+                    drawImage(
+                        image = bmp,
+                        srcOffset = IntOffset.Zero,
+                        srcSize = IntSize(bmp.width, bmp.height),
+                        dstOffset = IntOffset(el.x.roundToInt(), el.y.roundToInt()),
+                        dstSize = IntSize(el.width.roundToInt(), el.height.roundToInt()),
+                        alpha = if (faded) 0.25f else 1f,
+                    )
+                }
+                is TextElement -> if (el.id != editingId && el.text.isNotEmpty()) {
+                    val paint = android.graphics.Paint().apply {
+                        this.color = el.color
+                        textSize = el.fontSize
+                        isAntiAlias = true
+                        if (faded) alpha = 64
+                    }
+                    drawContext.canvas.nativeCanvas.drawText(el.text, el.x, el.y + el.fontSize, paint)
+                }
+            }
+        }
+    }
+}
+
+/** 笔迹是否被擦除点（半径 r，含笔宽）命中：按「点到线段」距离判定，快笔稀疏采样也不漏。 */
+private fun strokeHit(el: StrokeElement, wx: Float, wy: Float, r: Float): Boolean {
+    val reach = r + el.width / 2f
+    val r2 = reach * reach
+    val pts = el.points
+    if (pts.size < 2) return false
+    if (pts.size == 2) {
+        val dx = pts[0] - wx
+        val dy = pts[1] - wy
+        return dx * dx + dy * dy <= r2
+    }
+    var i = 0
+    while (i + 3 < pts.size) {
+        val ax = pts[i]; val ay = pts[i + 1]
+        val bx = pts[i + 2]; val by = pts[i + 3]
+        val vx = bx - ax; val vy = by - ay
+        val len2 = vx * vx + vy * vy
+        val t = if (len2 <= 1e-6f) 0f else (((wx - ax) * vx + (wy - ay) * vy) / len2).coerceIn(0f, 1f)
+        val dx = wx - (ax + vx * t)
+        val dy = wy - (ay + vy * t)
+        if (dx * dx + dy * dy <= r2) return true
+        i += 2
+    }
+    return false
+}
+
 /** 落墨渲染：轮廓填充 + Path 缓存（key 随平移变化自动失效）。 */
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokeElement(
     el: StrokeElement,
     cache: HashMap<String, List<Path>>,
+    faded: Boolean = false,
 ) {
     if (el.points.size < 2) return
     if (cache.size > 800) cache.clear()
@@ -888,7 +1110,8 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokeElement(
         val radii = if (el.widths.size == n) el.widths.map { it / 2f } else List(n) { el.width / 2f }
         buildInkPaths(el.tool, el.points, radii)
     }
-    val c = Color(el.color)
+    val base = Color(el.color)
+    val c = if (faded) base.copy(alpha = base.alpha * 0.25f) else base
     when (el.tool) {
         "highlighter" -> drawPath(paths[0], c, blendMode = androidx.compose.ui.graphics.BlendMode.Multiply)
         "pencil" -> {
