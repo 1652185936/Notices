@@ -1,7 +1,7 @@
 # CLAUDE.md — 项目交接说明（给接手的 AI / 开发者）
 
 > 本文件是项目的"一页上手"。先读这份，再看 `docs/`。
-> 作者诚实交代：**功能层做得比较全，但 UI 视觉还原华为做得不到位——这是最大短板，接手第一优先级就是它。**
+> 当前阶段共识：**壳（图标/布局）只是及格线，书写手感与交互质感才是这个项目的灵魂**。用户对"换皮不换芯"零容忍，每一轮改动都要在模拟器/真机实测出"能感受到的差异"再交付。
 
 ---
 
@@ -10,115 +10,119 @@
 - 代号 **Notices**，目标：**复刻华为笔记（HUAWEI Notes）**，在 **HarmonyOS 4（华为，安卓兼容层）** 上侧载使用。
 - **对标对象 = 华为笔记**（专业手写/图文笔记），其旗舰功能 **「无界笔记」= 无限画布模式**，是本项目核心。
   - ⚠️ 不是"华为备忘录"（那是另一个更轻量的内置 App）。立项初期曾搞错，已纠正。
+- 交互参照不限于华为：用户认可"一笔记/享做笔记"类 App 的拟物笔托盘与笔刷质感，**好的就学**。
 - 应用内两种笔记形态：
   - **分页笔记**（图文富文本）：列表 FAB →「笔记」
   - **无界笔记**（无限画布）：列表 FAB →「无界笔记」
 
 ---
 
-## 2. 关键约束（务必先知道，否则会走弯路）
+## 2. 开发环境（两套，先分清自己在哪套）
 
-1. **目标设备是华为（鸿蒙 4），没有 Google Play 服务（GMS）。**
-   - 能用：**ML Kit 端侧 bundled 版**（`text-recognition-chinese`，离线 OCR，不依赖 GMS）、系统 `SpeechRecognizer`、`BiometricPrompt`。
-   - **不能用**：任何 GMS 依赖 API（如 ML Kit Document Scanner = `play-services-mlkit-document-scanner`）。文档扫描的边缘检测要做就得用 OpenCV 自实现。
-2. **本仓库的开发云环境无法本地编译/运行**：没有 Android SDK，且网络是**白名单制**——只放行 `github.com` / `repo1.maven.org`(Maven Central) / `services.gradle.org`，**其它全部 403**（Google Maven、华为官网、Bing/百度/DuckDuckGo 图片搜索…全连不出去）。
-   - 后果一：**APK 由 GitHub Actions 构建**（见 §5），不能在本地 `./gradlew` 跑通。
-   - 后果二：**抓不到任何外部图片/截图**做参照。要还原华为 UI，**只能靠用户上传的截图**（上传的本地图片可以 Read 查看）。
-3. **不要用 Figma 工具去"截华为 App"**——Figma 工具只能截 Figma 设计稿，截不到华为 App。
+1. **用户本机 Windows（当前主力，强烈推荐）**：
+   - Android SDK 在 `%LOCALAPPDATA%\Android\Sdk`（platform-34 + build-tools 34.0.0），`local.properties` 已指向（gitignore）。Java 17、ffmpeg、Chrome 都有，网络无限制。
+   - 雷电模拟器 `emulator-5554` 常驻（2560×1440 平板横屏，安卓版本较老：不支持 `cmd input motionevent`，多点触控注入不可用）。
+   - **视觉验证闭环（单轮十几秒）**：`gradlew assembleDebug` → `adb install -r` → `adb shell input tap/swipe` → `adb shell screencap` + pull → 看图对照 `refs/huawei/` 参照素材迭代。
+2. **云开发环境（早期用过）**：无 SDK、网络白名单（仅 github/Maven Central/gradle.org），只能推 CI 等编译、拿不到外部图——**能用本机就别用这套**。
+
+目标设备约束：**华为鸿蒙 4 无 GMS**。能用 ML Kit bundled 中文 OCR、系统 `SpeechRecognizer`、`BiometricPrompt`；**不能用任何 GMS 依赖 API**（如 ML Kit Document Scanner）。
 
 ---
 
 ## 3. 技术栈与架构
 
-- Kotlin · Jetpack Compose · Room · Hilt · Coil · kotlinx.serialization · WorkManager(未全接) · BiometricPrompt · ML Kit(bundled 中文 OCR)
-- minSdk 26 / targetSdk 34，包名 `com.yhx.notices`，单 module（`app`）
+- Kotlin · Jetpack Compose（BOM 2024.10，UI 1.7，支持 `PointerInputChange.pressure`）· Room · Hilt · Coil · kotlinx.serialization · BiometricPrompt · ML Kit(bundled 中文 OCR)
+- minSdk 26 / targetSdk 34，包名 `com.yhx.notices`，单 module（`app`），版本 `0.2.0-ink`
 - 架构：MVVM 单向数据流（ViewModel + StateFlow / Compose state）
-- 依赖用版本目录 `gradle/libs.versions.toml`
 
 ```
 app/src/main/java/com/yhx/notices/
  ├─ data/
- │   ├─ local/        Room：Entities/DAO/NoticesDatabase（DB version=3）
- │   ├─ repository/   NoteRepository / FolderRepository / TodoRepository /
- │   │                AttachmentRepository / AudioEngine / OcrEngine / NoteCrypto /
- │   │                TagRepository / UserPrefs
+ │   ├─ local/        Room：Entities/DAO/NoticesDatabase（DB version=3，schemas/ 已入库）
+ │   ├─ repository/   NoteRepository / FolderRepository / TodoRepository / Attachment /
+ │   │                AudioEngine / OcrEngine / NoteCrypto / TagRepository / UserPrefs
  │   ├─ backup/       BackupManager（zip 导入导出）
- │   └─ export/       ExportManager（长图 / PDF / 分享）
+ │   └─ export/       ExportManager（长图/PDF/分享；画布导出与屏显共用 InkGeometry）
  ├─ domain/
- │   ├─ richtext/     分页富文本引擎：块模型/样式算法/序列化（有 32 个单测）
- │   ├─ canvas/       无界笔记画布模型 CanvasModel（世界坐标元素 + 序列化）
+ │   ├─ richtext/     分页富文本引擎：块模型/样式算法/序列化（32 个单测）
+ │   ├─ canvas/       CanvasModel（世界坐标元素+序列化，StrokeElement 含 widths 逐点宽）
+ │   │                ★InkGeometry：墨迹几何引擎（Catmull-Rom 重采样 + 变宽轮廓多边形 +
+ │   │                  圆头/平头帽 + 收笔笔锋），纯 Kotlin 有单测，屏显/导出两端共用
  │   └─ model/        Note / NoteListItem / 枚举
  ├─ reminder/         待办提醒（AlarmManager + 通知 + 启动重建）
  ├─ ui/
- │   ├─ notes/        列表 NotesListScreen + NoteListViewModel（文件夹抽屉/排序/视图/移动/删除撤销）
- │   ├─ editor/       分页编辑器 NoteEditorScreen/ViewModel + EditorToolbars + SketchEditor(手写画板) + SpanStyleMapping
- │   ├─ canvas/       ★无界笔记 CanvasScreen/ViewModel（核心，UI 重点在这）
+ │   ├─ icons/        ★HwIcons：约 40 枚自绘单色线性 ImageVector（24×24，tint 染色）
+ │   │                ★HwPens：6 支多色拟物笔插画（28×64，须 tint=Unspecified）
+ │   ├─ notes/        首页 NotesListScreen（华为版式：大标题/搜索条/自适应卡片网格/蓝 FAB）
+ │   ├─ editor/       分页编辑器（华为化顶栏 + B/I/U/S 字形格式栏 + 自绘图标插入栏）
+ │   ├─ canvas/       ★CanvasScreen/ViewModel（核心，约 1700 行，见 §4 详述）
  │   ├─ todo/ search/ trash/ settings/ security/ theme/ navigation/ AppViewModel
  ├─ di/               Hilt DatabaseModule
- └─ MainActivity（FragmentActivity，含应用锁门禁）/ NoticesApp（通知渠道）
+ └─ MainActivity（FragmentActivity，应用锁门禁）/ NoticesApp（通知渠道）
 ```
 
-Room 迁移：v1→v2 加 `notes.isCanvas`；v2→v3 加 `folders.parentId`。**改 schema 必须加 Migration，禁止破坏式迁移**（DatabaseModule 里注册）。
+Room 迁移：v1→v2 加 `notes.isCanvas`；v2→v3 加 `folders.parentId`。**改 schema 必须加 Migration，禁止破坏式迁移**（DatabaseModule 注册）。
 
 ---
 
-## 4. 已实现功能（功能层，多数已 CI 验证）
+## 4. 无界笔记现状（本项目核心，重点读）
 
-- **无界笔记（CanvasScreen）**：无限画布、缩放 10%–1000%、钢笔/铅笔/荧光笔/橡皮、**套索圈选→移动/复制/删除**、**一笔成形(直线/矩形/椭圆)**、文字框(可二次编辑)、图片、**插入纵向空白**、纸张模板(网格/横线/点阵)、**缩略图小地图**、贴纸(Emoji)、导出图片/PDF/分享。工具栏已改成顶部图标 + 点笔弹「笔刷设置」浮层(粗细+36色网格)。
-- **分页笔记**：富文本(加粗/斜体/下划线/删除线/颜色/高亮/字号)、H1-H3、无序/有序/清单、图片(全屏缩放查看)、手写画板、录音、表格、信纸样式、撤销重做、自动保存、**OCR 提取文字**(图片查看器内)、**语音转文字**、标签、加密(指纹/系统密码)、导出/分享。
-- **整理**：多层嵌套文件夹(改名/改色/删除)、全文搜索(FTS+中文 LIKE 兜底)+关键词高亮、置顶/收藏、回收站、多选批量。
-- **待办**：分组(逾期/今天/未来/无日期/已完成)、子任务+进度、重复规则、编辑、滑动删除、重复自动续期、时间提醒(闹钟+通知)。
-- **其它**：本地备份/恢复、深浅色主题、应用锁。
+### 书写引擎（2026-06 重写，已实测）
+- **渲染**：折线描边已废弃。落墨 = `InkGeometry.strokeOutline()` 生成变宽轮廓多边形后**填充**；
+  实时预览/落墨/导出走同一引擎，所见即所得。落墨 Path 有缓存（key 含首末点，套索平移自动失效）。
+- **动态笔宽**：手写笔压感优先（`change.pressure`），否则笔速映射（慢粗快细）+ 指数平滑；起笔渐入、收笔 `taperTail()` 三段递减出笔锋。
+- **分笔刷质感**（`CanvasTool`）：钢笔 FOUNTAIN（0.8×宽，近恒宽微提按）、秀丽笔 PEN（1.45×~0.5× 大幅提按）、铅笔 PENCIL（双层渲染：毛边宽层 45% + 紧实芯层 75%，半径逐点确定性抖动）、马克笔 MARKER（2.2×宽 92% 实色恒宽）、荧光笔 HIGHLIGHTER（3×宽 35% 透明平头 + **Multiply 混合**真叠色）。
+- **分层渲染**：已落墨内容烘焙为视口位图（`BakeStamp` 失效判定 + 60ms 防抖重烘，平移/缩放期矢量兜底），书写帧只画位图+当前一笔。`CanvasViewModel.revision` 驱动缓存失效——**任何元素变更都必须走 `markDirty()`**。
+- **手势**：书写事件环中第二指落下 → 丢弃半笔转双指缩放平移；防误触开 = 手指仅平移、手写笔书写。
+- **橡皮**：拖动实时命中灰显（25% 透明预览），抬手统一删（可撤销）；命中是**点到线段**距离（别改回点对点，快笔稀疏采样会漏擦）。
 
-详尽对照见 `docs/08-实现进展与功能对照.md`。
+### 界面
+- 顶部两行华为式：标题行（圆形返回+徽标+标题+插入/缩略图/九宫格菜单圆钮）+ 工具行（撤销重做｜移动/套索/文字｜一笔成形/防误触/纸张四选）。
+- **底部拟物笔托盘**（参照一笔记类 App）：六支真笔插画、选中上浮动画、2×5 快捷色板、三档笔号、设置入口；把手可收起成底部小条。点已选中的笔 = 开关笔刷面板（粗细/不透明度细滑条 + 36 色网格，托盘上方弹出带缩放动画）。
+- 其它：缩放胶囊（点按回 100%）、小地图（可开关）、**「回到内容」浮钮**（内容完全出视野时出现，点击 380ms 动画飞回适配）、贴纸、插入纵向空白、导出图片/PDF。
 
----
-
-## 5. 构建 / 运行 / 出 APK
-
-**APK 由 GitHub Actions 构建**（`.github/workflows/android.yml`）：每次 push 到 `claude/**` 分支自动跑单测 + `assembleDebug` + 上传 artifact。
-- 下载：仓库 **Actions → 最新绿色 Android CI 运行 → Artifacts → `notices-debug-apk`**（zip，内含 `app-debug.apk`）。
-- 装到**安卓模拟器/华为真机**：`adb install app-debug.apk` 或拖进模拟器。鸿蒙 5/NEXT 模拟器装不了（无安卓层）。
-
-**有本地 Android 环境的话**（接手者推荐）：
-```
-./gradlew assembleDebug      # 产物 app/build/outputs/apk/debug/app-debug.apk
-./gradlew testDebugUnitTest  # 富文本引擎单测
-```
-**强烈建议接手者在本地用 Android Studio 跑**，别再走"推 CI 等编译"那套——那样验证一轮要好几分钟、极烧 token，是本项目前期最大的浪费。
-
-分支：开发都在 `claude/huawei-notes-analysis-1dtb9r`。
+### 队列中（按优先级，用户已确认方向：不要问，直接做好）
+1. 套索选区缩放/旋转控制手柄、选中笔迹改色改粗细
+2. 一笔成形接墨迹引擎 + 更多形状（箭头/三角）+ 成形回弹动画
+3. 每支笔独立参数面板（华为：铅笔有压感灵敏度、秀丽笔有稳定度）
+4. 低延迟优化（运动预测）、触觉反馈、暗色画布、自定义取色器
 
 ---
 
-## 6. UI 视觉还原状态（2026-06 已大幅推进）
+## 5. 构建 / 签名 / 出 APK
 
-原三大短板（①无界笔记工具栏 ②首页列表 ③分页编辑器工具栏）**已对照华为官方截图重做并在模拟器实测**：
+- **调试签名已固定**：`app/debug.keystore` 在仓库内（密码 android/android，alias androiddebugkey），CI 与本地构建签名一致，**覆盖安装永远有效**。⚠️ 此前 CI 每次用 runner 临时签名导致"覆盖安装静默失败、用户以为装了新包"，引发过严重误判——别删这个 keystore。
+- 本地：`gradlew assembleDebug` / `gradlew testDebugUnitTest`（富文本 32 测 + InkGeometry 4 测）。
+- CI：push 到 `claude/**` 自动跑（`.github/workflows/android.yml`，Actions 已升 Node 24）。下载：Actions → 绿色运行 → Artifacts → `notices-debug-apk`。
+- 模拟器装 CI 包与本地包可互相覆盖（同签名）。鸿蒙 5/NEXT 模拟器装不了（无安卓层）。
+- 分支：开发都在 `claude/huawei-notes-analysis-1dtb9r`。
 
-- **自绘矢量图标库 `ui/icons/HwIcons.kt`**：约 40 枚 24×24 线性 ImageVector（笔具/套索/纸张/防误触/相机/麦克风/表格/导航等），全部代码内手绘路径，无第三方图标依赖。新增图标继续加在这里。
-- **无界笔记**：两行式顶栏（标题行圆钮组 + 工具行），三档线宽波浪预设 + 快捷色点（选中色为圆环），笔刷浮层（笔尖选项卡/粗细/不透明度细滑条/36 色网格），纸张四选面板、重做栈、防误触（手指平移、手写笔书写）、缩放胶囊、小地图开关。
-- **首页**：大标题+数量+搜索条、自适应卡片网格（日期/收藏/置顶角标）、蓝色 FAB 展开白胶囊选项、底部导航蓝色胶囊；主题已补全 primaryContainer 等容器色（之前回落 M3 默认紫）。
-- **分页编辑器**：顶栏华为化（圆形返回/撤销重做/九宫格菜单），格式栏 B/I/U/S 字形按钮 + 自绘图标，插入栏全自绘图标。
+---
 
-**仍待打磨**：套索"调整大小/转文本"、橡皮"擦除整个笔划"开关、各页动效/触觉反馈、深色画布适配细节。参照素材在本地 `refs/huawei/`（已 gitignore，官方产品图/演示视频帧/工具栏高清裁切图）。`docs/10-差距分析与缺陷清单.md` 有完整清单。
+## 6. UI 还原状态速览
 
-**视觉验证工作流（本机已打通，强烈建议沿用）**：本地 `gradlew assembleDebug` → `adb install -r` 到模拟器 → `adb shell input tap/swipe` 操作 → `adb shell screencap` 截图对照华为参照图迭代，单轮十几秒。
+- **首页**：华为平板版式完成（大标题/数量/搜索条/自适应白卡网格/蓝 FAB 展开胶囊/底部导航蓝胶囊）。主题已补全 primaryContainer 等容器色（曾回落 M3 默认紫）。
+- **分页编辑器**：顶栏华为化 + 字形格式栏 + 自绘图标插入栏，完成度中——后续可对照华为继续抠间距/动效。
+- **无界笔记**：见 §4，目前是全项目完成度最高、也最被用户盯着的界面。
+- 参照素材在本地 `refs/huawei/`（gitignore）：官网产品图（`product-2x.png` 是无界笔记基准图、`professional-brushes-1` 是笔刷面板特写）、官方演示视频、`crops/` 工具栏 3 倍裁切。图标先在 `refs/icons/*.html` 用 SVG 设计、无头 Chrome 截图审稿，再移植 ImageVector（`addPathNodes()` 直接吃 SVG path 字符串）。
 
 ---
 
 ## 7. 设计文档索引（docs/）
 
 - `00` 总体设计、`01` 需求、`02` 数据库、`03` 富文本引擎、`04` UI、`05` 模块、`06` 安全、`07` 测试
-- `08` 实现进展与功能对照（**最新状态以此为准**）
-- `09` 无界笔记画布设计（核心模块架构）
-- `10` 差距分析与缺陷清单（**对华为的自我批判 + 待办优先级**）
+- `08` 实现进展与功能对照、`09` 无界笔记画布设计、`10` 差距分析与缺陷清单
+- ⚠️ docs 落后于代码（笔托盘/墨迹引擎/分层渲染未入档），以本文件 §4 和代码为准。
 
 ---
 
-## 8. 给接手者的几条提醒
+## 8. 给接手者的提醒（都是踩过的坑）
 
-1. 改 Compose 图标用 **import 后的短名**（`Icons.Default.X`），**不要写全限定 `androidx.compose.material.icons.Icons.Default.X`**（图标是扩展属性，全限定不解析，本项目踩过多次）。
-2. 改 Room schema 必加 Migration（见 §3）。
-3. 华为云同步/碰一碰流转/云端 AI(慧写/小艺/公式识别) 属生态封闭，单机做不了，按"占位/端侧替代"处理。
-4. 视觉还原靠用户截图，环境内**拿不到外部图**（§2）。
-5. 富文本引擎、画布模型这些**纯 Kotlin 逻辑有单测、较可靠**；UI 层是要重点打磨的。
+1. **改含中文的源文件只用 Edit/Write 工具**，绝不用 PowerShell `Get-Content | Set-Content` 管道——PS 5.1 按 GBK 误读 UTF-8 无 BOM 文件，中文全变乱码且 Edit 救不回（只能整文件重写）。
+2. 改 Compose 图标用 **import 短名**（`Icons.Default.X`），全限定名不解析。
+3. 改 Room schema 必加 Migration（见 §3）。
+4. `HwPens` 多色插画必须 `tint = Color.Unspecified`，否则被染成单色。
+5. Kotlin 属性 `var background` 与 `fun setBackground()` JVM 签名冲突——同名 setter 函数要换名（如 `changeBackground`）。
+6. 模拟器偶发白屏（`mCurrentFocus=null`）不是崩溃，`am start` 重拉即可；冷启动后等足 4~5 秒再注入点击。
+7. 华为云同步/碰一碰流转/云端 AI 属生态封闭，按"占位/端侧替代"处理。
+8. 纯 Kotlin 逻辑（富文本引擎、InkGeometry、画布模型）有单测较可靠；改完 UI 必须模拟器截图实测，**口头"应该可以"不算交付**。
