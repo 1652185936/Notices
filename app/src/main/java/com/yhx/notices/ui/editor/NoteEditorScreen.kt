@@ -289,13 +289,28 @@ fun NoteEditorScreen(
         }
 
         viewerPath?.let { p ->
-            ImageViewerOverlay(path = p, onClose = { viewerPath = null })
+            ImageViewerOverlay(
+                path = p,
+                onClose = { viewerPath = null },
+                onOcr = {
+                    viewModel.ocr(p) { text ->
+                        if (text.isBlank()) {
+                            android.widget.Toast.makeText(context, "未识别到文字", android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                as android.content.ClipboardManager
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("ocr", text))
+                            android.widget.Toast.makeText(context, "已识别并复制文字", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+            )
         }
     }
 }
 
 @Composable
-private fun ImageViewerOverlay(path: String, onClose: () -> Unit) {
+private fun ImageViewerOverlay(path: String, onClose: () -> Unit, onOcr: () -> Unit) {
     var scale by remember { mutableStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
     val state = rememberTransformableState { zoom, offsetChange, _ ->
@@ -318,6 +333,12 @@ private fun ImageViewerOverlay(path: String, onClose: () -> Unit) {
             )
             IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopStart)) {
                 Icon(Icons.Default.Close, contentDescription = "关闭", tint = Color.White)
+            }
+            androidx.compose.material3.TextButton(
+                onClick = onOcr,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp),
+            ) {
+                Text("提取文字", color = Color.White)
             }
         }
     }

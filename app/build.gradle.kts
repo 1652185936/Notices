@@ -80,6 +80,7 @@ dependencies {
     ksp(libs.hilt.compiler)
 
     implementation(libs.coil.compose)
+    implementation(libs.mlkit.text.chinese)
     implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.junit)

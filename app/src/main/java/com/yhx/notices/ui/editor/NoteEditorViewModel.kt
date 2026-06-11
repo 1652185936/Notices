@@ -14,6 +14,7 @@ import com.yhx.notices.data.export.ExportManager
 import com.yhx.notices.data.repository.AttachmentRepository
 import com.yhx.notices.data.repository.AudioEngine
 import com.yhx.notices.data.repository.NoteRepository
+import com.yhx.notices.data.repository.OcrEngine
 import com.yhx.notices.domain.model.Note
 import com.yhx.notices.domain.richtext.Block
 import com.yhx.notices.domain.richtext.BlockOps
@@ -40,6 +41,7 @@ class NoteEditorViewModel @Inject constructor(
     private val attachmentRepo: AttachmentRepository,
     private val audioEngine: AudioEngine,
     private val exportManager: ExportManager,
+    private val ocrEngine: OcrEngine,
 ) : ViewModel() {
 
     val noteId: Long = savedStateHandle.get<String>("noteId")?.toLongOrNull() ?: -1L
@@ -493,6 +495,10 @@ class NoteEditorViewModel @Inject constructor(
             val bmp = exportManager.renderPaged(title, NoteContent(blocks = blocks.toList()))
             onUri(exportManager.bitmapToPdf(bmp, exportName()))
         }
+    }
+
+    fun ocr(path: String, onResult: (String) -> Unit) {
+        viewModelScope.launch { onResult(ocrEngine.recognize(path)) }
     }
 
     suspend fun attachmentPath(id: Long): String? =
