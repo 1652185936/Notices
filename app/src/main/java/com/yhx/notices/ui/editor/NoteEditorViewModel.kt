@@ -11,6 +11,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.yhx.notices.data.repository.AttachmentRepository
+import com.yhx.notices.data.repository.AudioEngine
 import com.yhx.notices.data.repository.NoteRepository
 import com.yhx.notices.domain.model.Note
 import com.yhx.notices.domain.richtext.Block
@@ -29,11 +30,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+data class AudioInfo(val durationMs: Long)
+
 @HiltViewModel
 class NoteEditorViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val noteRepo: NoteRepository,
     private val attachmentRepo: AttachmentRepository,
+    private val audioEngine: AudioEngine,
 ) : ViewModel() {
 
     val noteId: Long = savedStateHandle.get<String>("noteId")?.toLongOrNull() ?: -1L
@@ -54,6 +58,7 @@ class NoteEditorViewModel @Inject constructor(
 
     var isPinned by mutableStateOf(false); private set
     var isFavorite by mutableStateOf(false); private set
+    var isRecording by mutableStateOf(false); private set
 
     private var loaded: Note? = null
     private var dirty = false
@@ -231,6 +236,116 @@ class NoteEditorViewModel @Inject constructor(
     fun removeBlock(blockId: String) {
         pushUndo()
         replaceAll(BlockOps.removeBlock(blocks.toList(), blockId)); markDirty()
+    }
+
+    fun insertDivider() {
+        pushUndo()
+        val anchor = focusedBlockId ?: blocks.lastOrNull()?.id
+        val divider = com.yhx.notices.domain.richtext.DividerBlock()
+        val newBlocks = if (anchor != null) BlockOps.insertAfter(blocks.toList(), anchor, divider)
+        else blocks.toList() + divider
+        replaceAll(newBlocks + TextBlock(kind = TextKind.PARAGRAPH))
+        markDirty()
+    }
+
+    fun insertTable() {
+        pushUndo()
+        val anchor = focusedBlockId ?: blocks.lastOrNull()?.id
+        val table = com.yhx.notices.domain.richtext.TableBlock(
+            rows = listOf(listOf("", ""), listOf("", ""))
+        )
+        val newBlocks = if (anchor != null) BlockOps.insertAfter(blocks.toList(), anchor, table)
+        else blocks.toList() + table
+        replaceAll(newBlocks + TextBlock(kind = TextKind.PARAGRAPH))
+        markDirty()
+    }
+
+    fun updateTableCell(blockId: String, row: Int, col: Int, value: String) {
+        val index = blocks.indexOfFirst { it.id == blockId }
+        if (index < 0) return
+        val table = blocks[index] as? com.yhx.notices.domain.richtext.TableBlock ?: return
+        val newRows = table.rows.mapIndexed { r, cells ->
+            if (r == row) cells.mapIndexed { c, v -> if (c == col) value else v } else cells
+        }
+        blocks[index] = table.copy(rows = newRows)
+        markDirty()
+    }
+
+    fun tableAddRow(blockId: String) {
+        val index = blocks.indexOfFirst { it.id == blockId }
+        if (index < 0) return
+        val table = blocks[index] as? com.yhx.notices.domain.richtext.TableBlock ?: return
+        val cols = table.rows.firstOrNull()?.size ?: 2
+        pushUndo()
+        blocks[index] = table.copy(rows = table.rows + listOf(List(cols) { "" }))
+        markDirty()
+    }
+
+    fun tableAddColumn(blockId: String) {
+        val index = blocks.indexOfFirst { it.id == blockId }
+        if (index < 0) return
+        val table = blocks[index] as? com.yhx.notices.domain.richtext.TableBlock ?: return
+        pushUndo()
+        blocks[index] = table.copy(rows = table.rows.map { it + "" })
+        markDirty()
+    }
+
+    // ---------- 录音 ----------
+    fun startRecording() {
+        if (audioEngine.startRecording()) isRecording = true
+    }
+
+    fun stopRecordingAndInsert() {
+        val result = audioEngine.stopRecording()
+        isRecording = false
+        if (result != null) {
+            viewModelScope.launch {
+                ensureSaved()
+                val (file, dur) = result
+                val attachmentId = attachmentRepo.saveAudio(noteId, file, dur)
+                pushUndo()
+                val anchor = focusedBlockId ?: blocks.lastOrNull()?.id
+                val audio = com.yhx.notices.domain.richtext.AudioBlock(attachmentId = attachmentId)
+                val newBlocks = if (anchor != null) BlockOps.insertAfter(blocks.toList(), anchor, audio)
+                else blocks.toList() + audio
+                replaceAll(newBlocks + TextBlock(kind = TextKind.PARAGRAPH))
+                markDirty()
+            }
+        }
+    }
+
+    fun cancelRecording() {
+        audioEngine.stopRecording()
+        isRecording = false
+    }
+
+    suspend fun audioInfo(id: Long): AudioInfo = AudioInfo(attachmentRepo.audioDuration(id))
+
+    fun playAudio(id: Long, onComplete: () -> Unit) {
+        viewModelScope.launch {
+            val f = attachmentRepo.resolvePath(id)
+            if (f != null && f.exists()) audioEngine.play(f, onComplete) else onComplete()
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        audioEngine.stopPlayback()
+    }
+
+    fun insertSketch(bitmap: android.graphics.Bitmap) {
+        viewModelScope.launch {
+            ensureSaved()
+            val attachmentId = attachmentRepo.saveSketch(noteId, bitmap)
+            pushUndo()
+            val anchor = focusedBlockId ?: blocks.lastOrNull()?.id
+            val sketch = com.yhx.notices.domain.richtext.SketchBlock(attachmentId = attachmentId)
+            val newBlocks = if (anchor != null) {
+                BlockOps.insertAfter(blocks.toList(), anchor, sketch)
+            } else blocks.toList() + sketch
+            replaceAll(newBlocks + TextBlock(kind = TextKind.PARAGRAPH))
+            markDirty()
+        }
     }
 
     fun insertImage(uri: Uri) {

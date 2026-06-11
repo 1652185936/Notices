@@ -11,13 +11,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.FormatBold
 import androidx.compose.material.icons.filled.FormatItalic
 import androidx.compose.material.icons.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.FormatListNumbered
 import androidx.compose.material.icons.filled.FormatStrikethrough
 import androidx.compose.material.icons.filled.FormatUnderlined
+import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Title
 import androidx.compose.material3.Icon
@@ -101,12 +104,16 @@ private fun ColorDot(color: Color, ring: Boolean = false, onClick: () -> Unit) {
 fun InsertBar(
     onImage: () -> Unit,
     onChecklist: () -> Unit,
+    onSketch: () -> Unit,
+    onAudio: () -> Unit,
+    onTable: () -> Unit,
     onDivider: () -> Unit,
 ) {
     Surface {
         Row(
             Modifier
                 .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 4.dp, vertical = 2.dp),
         ) {
             IconButton(onClick = onImage) {
@@ -114,6 +121,15 @@ fun InsertBar(
             }
             IconButton(onClick = onChecklist) {
                 Icon(Icons.Default.CheckCircle, contentDescription = "插入清单")
+            }
+            IconButton(onClick = onSketch) {
+                Icon(Icons.Default.Draw, contentDescription = "手写")
+            }
+            IconButton(onClick = onAudio) {
+                Icon(Icons.Default.Mic, contentDescription = "录音")
+            }
+            IconButton(onClick = onTable) {
+                Icon(Icons.Default.GridOn, contentDescription = "表格")
             }
             IconButton(onClick = onDivider) {
                 Icon(Icons.Default.Remove, contentDescription = "分割线")

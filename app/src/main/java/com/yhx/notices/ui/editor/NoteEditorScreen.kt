@@ -4,14 +4,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -76,6 +79,13 @@ fun NoteEditorScreen(
         ActivityResultContracts.PickVisualMedia()
     ) { uri -> uri?.let { viewModel.insertImage(it) } }
 
+    val audioPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> if (granted) viewModel.startRecording() }
+
+    var showSketch by remember { mutableStateOf(false) }
+
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -126,7 +136,13 @@ fun NoteEditorScreen(
                         )
                     },
                     onChecklist = viewModel::toggleChecklistKind,
-                    onDivider = { /* 预留：插入分割线 */ },
+                    onSketch = { showSketch = true },
+                    onAudio = {
+                        if (viewModel.isRecording) viewModel.stopRecordingAndInsert()
+                        else audioPermission.launch(android.Manifest.permission.RECORD_AUDIO)
+                    },
+                    onTable = viewModel::insertTable,
+                    onDivider = viewModel::insertDivider,
                 )
             }
         },
@@ -165,6 +181,56 @@ fun NoteEditorScreen(
             }
         }
     }
+
+        if (showSketch) {
+            SketchEditor(
+                onCancel = { showSketch = false },
+                onDone = { bmp -> viewModel.insertSketch(bmp); showSketch = false },
+            )
+        }
+
+        if (viewModel.isRecording) {
+            RecordingBar(
+                onStop = { viewModel.stopRecordingAndInsert() },
+                onCancel = { viewModel.cancelRecording() },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecordingBar(
+    onStop: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var elapsed by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1000)
+            elapsed += 1
+        }
+    }
+    androidx.compose.material3.Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.errorContainer,
+        tonalElevation = 4.dp,
+    ) {
+        androidx.compose.foundation.layout.Row(
+            Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(12.dp).background(MaterialTheme.colorScheme.error, androidx.compose.foundation.shape.CircleShape))
+            Text(
+                "  正在录音  %02d:%02d".format(elapsed / 60, elapsed % 60),
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Box(Modifier.weight(1f))
+            androidx.compose.material3.TextButton(onClick = onCancel) { Text("取消") }
+            androidx.compose.material3.Button(onClick = onStop) { Text("完成") }
+        }
+    }
 }
 
 @Composable
@@ -172,11 +238,11 @@ private fun BlockRenderer(block: Block, vm: NoteEditorViewModel) {
     when (block) {
         is TextBlock -> EditableText(block, vm)
         is ChecklistBlock -> ChecklistRow(block, vm)
-        is ImageBlock -> ImageBlockView(block, vm)
+        is ImageBlock -> AttachmentImageView(block.attachmentId, vm)
         is DividerBlock -> HorizontalDivider(Modifier.padding(vertical = 12.dp))
-        is AudioBlock -> PlaceholderBlock("🎙 录音")
-        is SketchBlock -> PlaceholderBlock("✏ 手写")
-        is TableBlock -> TableView(block)
+        is AudioBlock -> AudioBlockView(block, vm)
+        is SketchBlock -> AttachmentImageView(block.attachmentId, vm)
+        is TableBlock -> TableView(block, vm)
     }
 }
 
@@ -288,54 +354,97 @@ private fun ChecklistRow(block: ChecklistBlock, vm: NoteEditorViewModel) {
 }
 
 @Composable
-private fun ImageBlockView(block: ImageBlock, vm: NoteEditorViewModel) {
-    var path by remember(block.attachmentId) { mutableStateOf<String?>(null) }
-    LaunchedEffect(block.attachmentId) {
-        path = vm.attachmentPath(block.attachmentId)
-    }
-    Box(
-        Modifier
+private fun AttachmentImageView(attachmentId: Long, vm: NoteEditorViewModel) {
+    var path by remember(attachmentId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(attachmentId) { path = vm.attachmentPath(attachmentId) }
+    AsyncImage(
+        model = path,
+        contentDescription = "图片",
+        modifier = Modifier
             .fillMaxWidth()
+            .heightIn(max = 280.dp)
             .padding(vertical = 6.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0x08000000)),
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+    )
+}
+
+@Composable
+private fun AudioBlockView(block: AudioBlock, vm: NoteEditorViewModel) {
+    var info by remember(block.attachmentId) { mutableStateOf<AudioInfo?>(null) }
+    var playing by remember { mutableStateOf(false) }
+    LaunchedEffect(block.attachmentId) { info = vm.audioInfo(block.attachmentId) }
+
+    androidx.compose.material3.Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
     ) {
-        AsyncImage(
-            model = path,
-            contentDescription = "图片",
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(220.dp)
-                .background(Color(0x11000000), RoundedCornerShape(8.dp)),
-        )
+        androidx.compose.foundation.layout.Row(
+            Modifier.padding(12.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = {
+                playing = true
+                vm.playAudio(block.attachmentId) { playing = false }
+            }) {
+                Icon(
+                    if (playing) androidx.compose.material.icons.Icons.Default.GraphicEq
+                    else androidx.compose.material.icons.Icons.Default.PlayArrow,
+                    contentDescription = "播放",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Text(
+                "录音  " + formatDuration(info?.durationMs ?: 0),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
-@Composable
-private fun PlaceholderBlock(label: String) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp)
-            .background(Color(0x11000000), RoundedCornerShape(8.dp))
-            .padding(16.dp)
-    ) { Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+private fun formatDuration(ms: Long): String {
+    val totalSec = (ms / 1000).toInt()
+    return "%02d:%02d".format(totalSec / 60, totalSec % 60)
 }
 
 @Composable
-private fun TableView(block: TableBlock) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        block.rows.forEach { row ->
-            androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth()) {
-                row.forEach { cell ->
-                    Text(
-                        cell.ifEmpty { " " },
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(8.dp),
-                        color = MaterialTheme.colorScheme.onBackground,
-                    )
+private fun TableView(block: TableBlock, vm: NoteEditorViewModel) {
+    androidx.compose.material3.Surface(
+        shape = RoundedCornerShape(8.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x22000000)),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            block.rows.forEachIndexed { r, row ->
+                androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth()) {
+                    row.forEachIndexed { c, cell ->
+                        BasicTextField(
+                            value = cell,
+                            onValueChange = { vm.updateTableCell(block.id, r, c, it) },
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                color = MaterialTheme.colorScheme.onBackground
+                            ),
+                            cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(8.dp),
+                        )
+                        if (c < row.size - 1) {
+                            Box(Modifier.width(1.dp).height(36.dp).background(Color(0x22000000)))
+                        }
+                    }
                 }
+                if (r < block.rows.size - 1) HorizontalDivider(thickness = 1.dp, color = Color(0x22000000))
             }
-            HorizontalDivider()
+            androidx.compose.foundation.layout.Row(
+                Modifier.fillMaxWidth().background(Color(0x06000000)),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                androidx.compose.material3.TextButton(onClick = { vm.tableAddRow(block.id) }) { Text("+ 行") }
+                androidx.compose.material3.TextButton(onClick = { vm.tableAddColumn(block.id) }) { Text("+ 列") }
+            }
         }
     }
 }

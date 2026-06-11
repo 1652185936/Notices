@@ -44,6 +44,48 @@ class AttachmentRepository @Inject constructor(
         )
     }
 
+    /** 保存手写位图为 PNG 附件，返回 attachmentId。 */
+    suspend fun saveSketch(noteId: Long, bitmap: android.graphics.Bitmap): Long = withContext(Dispatchers.IO) {
+        val name = "${UUID.randomUUID()}.png"
+        val dest = File(noteDir(noteId), name)
+        dest.outputStream().use { out ->
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+        }
+        attachmentDao.insert(
+            AttachmentEntity(
+                noteId = noteId,
+                type = AttachmentType.SKETCH,
+                fileName = "attachments/$noteId/$name",
+                mimeType = "image/png",
+                sizeBytes = dest.length(),
+                width = bitmap.width,
+                height = bitmap.height,
+            )
+        )
+    }
+
+    /** 保存录音文件为附件，返回 attachmentId。 */
+    suspend fun saveAudio(noteId: Long, source: File, durationMs: Long): Long = withContext(Dispatchers.IO) {
+        val name = "${UUID.randomUUID()}.m4a"
+        val dest = File(noteDir(noteId), name)
+        source.copyTo(dest, overwrite = true)
+        runCatching { source.delete() }
+        attachmentDao.insert(
+            AttachmentEntity(
+                noteId = noteId,
+                type = AttachmentType.AUDIO,
+                fileName = "attachments/$noteId/$name",
+                mimeType = "audio/mp4",
+                sizeBytes = dest.length(),
+                durationMs = durationMs,
+            )
+        )
+    }
+
+    suspend fun audioDuration(attachmentId: Long): Long = withContext(Dispatchers.IO) {
+        attachmentDao.getById(attachmentId)?.durationMs ?: 0L
+    }
+
     suspend fun resolvePath(attachmentId: Long): File? = withContext(Dispatchers.IO) {
         val entity = attachmentDao.getById(attachmentId) ?: return@withContext null
         File(context.filesDir, entity.fileName)
