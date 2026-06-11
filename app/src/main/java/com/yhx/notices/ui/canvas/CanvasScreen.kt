@@ -90,6 +90,7 @@ import com.yhx.notices.ui.icons.HwIcons
 import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.roundToInt
@@ -274,7 +275,10 @@ private fun elementBounds(el: com.yhx.notices.domain.canvas.CanvasElement): Floa
     else -> null
 }
 
-/** 一笔成形：把手绘笔迹识别为直线/矩形/椭圆，返回规整后的点；无法识别返回 null。 */
+/**
+ * 一笔成形：把手绘笔迹识别为直线/矩形/椭圆/三角形/箭头，返回规整后的扁平点 [x0,y0,...]。
+ * 识别已大幅收紧——宁可不识别（返回 null = 保留原始手绘）也不误伤有意的曲线/字母数字。
+ */
 private fun recognizeShape(pts: List<Float>): List<Float>? {
     if (pts.size < 10) return null
     val n = pts.size / 2
@@ -283,15 +287,21 @@ private fun recognizeShape(pts: List<Float>): List<Float>? {
     val minX = xs.min(); val maxX = xs.max(); val minY = ys.min(); val maxY = ys.max()
     val w = maxX - minX; val h = maxY - minY
     val span = maxOf(w, h)
-    if (span < 24f) return null
+    if (span < 48f) return null // span 不够大不规整，避免误伤小字
     val x0 = xs[0]; val y0 = ys[0]; val x1 = xs[n - 1]; val y1 = ys[n - 1]
+    val closeGap = hypot(x1 - x0, y1 - y0)
 
+    // —— 直线：严格直 + 弦够长。10% 太松会拉直有意曲线，收到 3.5%。
     var maxPerp = 0f
     for (i in 0 until n) maxPerp = maxOf(maxPerp, perpDist(xs[i], ys[i], x0, y0, x1, y1))
-    val chord = hypot(x1 - x0, y1 - y0)
-    if (chord > span * 0.5f && maxPerp < span * 0.10f) return lineSamples(x0, y0, x1, y1)
+    val chord = closeGap
+    if (chord > span * 0.6f && maxPerp < span * 0.035f) return lineSamples(x0, y0, x1, y1)
 
-    if (hypot(x1 - x0, y1 - y0) > span * 0.30f) return null // 未闭合
+    // —— 箭头：近直线主干 + 末端有明显折返/勾（未闭合）。
+    recognizeArrow(xs, ys, span)?.let { return it }
+
+    // —— 闭合图形（矩形/椭圆/三角）：首尾必须接近闭合。
+    if (closeGap > span * 0.22f) return null
     val cx = (minX + maxX) / 2; val cy = (minY + maxY) / 2
     val rx = w / 2; val ry = h / 2
     var ellRes = 0f; var rectRes = 0f
@@ -301,12 +311,105 @@ private fun recognizeShape(pts: List<Float>): List<Float>? {
         rectRes += distToRectEdge(xs[i], ys[i], minX, minY, maxX, maxY) / span
     }
     ellRes /= n; rectRes /= n
+
+    // —— 三角形：三个主导转角，闭合多边形拟合。残差更优才取。
+    val tri = recognizeTriangle(xs, ys, span)
+    if (tri != null) {
+        val triRes = tri.second
+        if (triRes < ellRes && triRes < rectRes && triRes < 0.16f) return tri.first
+    }
+
+    // 椭圆 / 矩形取更优者，且必须足够小才接受，否则保留原笔迹。
+    val best = minOf(ellRes, rectRes)
+    if (best >= 0.16f) return null
     return if (ellRes < rectRes) ellipseSamples(cx, cy, rx, ry) else rectSamples(minX, minY, maxX, maxY)
+}
+
+/**
+ * 三角形识别：在闭合笔迹上找 3 个主导转角（离首末点连线方向偏折最大的点），
+ * 以包围盒尺度归一化的边残差衡量拟合度。返回 (规整点, 残差)，不像三角形返回 null。
+ */
+private fun recognizeTriangle(xs: FloatArray, ys: FloatArray, span: Float): Pair<List<Float>, Float>? {
+    val n = xs.size
+    if (n < 6) return null
+    // 起点固定为顶点 A，再找离 A 最远的点 B，再找离直线 AB 最远的点 C。
+    var bIdx = 0; var bDist = -1f
+    for (i in 1 until n) {
+        val d = hypot(xs[i] - xs[0], ys[i] - ys[0])
+        if (d > bDist) { bDist = d; bIdx = i }
+    }
+    var cIdx = 0; var cDist = -1f
+    for (i in 0 until n) {
+        val d = perpDist(xs[i], ys[i], xs[0], ys[0], xs[bIdx], ys[bIdx])
+        if (d > cDist) { cDist = d; cIdx = i }
+    }
+    if (cDist < span * 0.2f) return null // 太扁，不是三角
+    val ax = xs[0]; val ay = ys[0]
+    val bx = xs[bIdx]; val by = ys[bIdx]
+    val cx = xs[cIdx]; val cy = ys[cIdx]
+    // 三顶点必须分得开（避免退化）。
+    if (hypot(bx - cx, by - cy) < span * 0.2f || hypot(ax - cx, ay - cy) < span * 0.2f) return null
+    // 残差：每个采样点到三角形三条边的最近距离，按 span 归一化。
+    var res = 0f
+    for (i in 0 until n) {
+        val d = minOf(
+            perpDistSeg(xs[i], ys[i], ax, ay, bx, by),
+            perpDistSeg(xs[i], ys[i], bx, by, cx, cy),
+            perpDistSeg(xs[i], ys[i], cx, cy, ax, ay),
+        )
+        res += d / span
+    }
+    res /= n
+    return triangleSamples(ax, ay, bx, by, cx, cy) to res
+}
+
+/**
+ * 箭头识别：笔迹主体近直线（主干），但末端一小段明显折返（勾）。
+ * 找尾部偏离主干方向最大的折点，若折角足够大则识别为箭头。
+ */
+private fun recognizeArrow(xs: FloatArray, ys: FloatArray, span: Float): List<Float>? {
+    val n = xs.size
+    if (n < 12) return null
+    // 取前 70% 作为主干，要求其近直线。
+    val trunkEnd = (n * 0.7f).toInt().coerceIn(2, n - 1)
+    val sx = xs[0]; val sy = ys[0]
+    val tx = xs[trunkEnd]; val ty = ys[trunkEnd]
+    val trunkLen = hypot(tx - sx, ty - sy)
+    if (trunkLen < span * 0.6f) return null
+    var trunkPerp = 0f
+    for (i in 0..trunkEnd) trunkPerp = maxOf(trunkPerp, perpDist(xs[i], ys[i], sx, sy, tx, ty))
+    if (trunkPerp > span * 0.08f) return null // 主干不够直
+    // 末端 30% 必须明显偏离主干方向（勾）。计算尾段相对主干的最大反向偏离。
+    val dirx = (tx - sx) / (trunkLen + 1e-3f)
+    val diry = (ty - sy) / (trunkLen + 1e-3f)
+    var tailPerp = 0f
+    for (i in trunkEnd until n) tailPerp = maxOf(tailPerp, perpDist(xs[i], ys[i], sx, sy, tx, ty))
+    if (tailPerp < span * 0.12f) return null // 末端没有明显勾，是普通直线（交给直线分支）
+    // 箭头尖端取主干末端 t 点，箭翼按主干方向回折 ±28°，长度约主干 22%。
+    val headLen = (trunkLen * 0.22f).coerceAtLeast(span * 0.12f)
+    val baseAngle = atan2(diry, dirx)
+    val wing = (28f * PI.toFloat() / 180f)
+    val a1 = baseAngle + PI.toFloat() - wing
+    val a2 = baseAngle + PI.toFloat() + wing
+    val w1x = tx + headLen * cos(a1); val w1y = ty + headLen * sin(a1)
+    val w2x = tx + headLen * cos(a2); val w2y = ty + headLen * sin(a2)
+    return arrowSamples(sx, sy, tx, ty, w1x, w1y, w2x, w2y)
 }
 
 private fun perpDist(px: Float, py: Float, ax: Float, ay: Float, bx: Float, by: Float): Float {
     val dx = bx - ax; val dy = by - ay; val len = hypot(dx, dy)
     return if (len < 1e-3f) hypot(px - ax, py - ay) else abs((px - ax) * dy - (py - ay) * dx) / len
+}
+
+/** 点到线段（非整条直线）的最近距离。 */
+private fun perpDistSeg(px: Float, py: Float, ax: Float, ay: Float, bx: Float, by: Float): Float {
+    val dx = bx - ax; val dy = by - ay
+    val len2 = dx * dx + dy * dy
+    if (len2 < 1e-6f) return hypot(px - ax, py - ay)
+    var t = ((px - ax) * dx + (py - ay) * dy) / len2
+    if (t < 0f) t = 0f else if (t > 1f) t = 1f
+    val qx = ax + t * dx; val qy = ay + t * dy
+    return hypot(px - qx, py - qy)
 }
 
 private fun distToRectEdge(px: Float, py: Float, minX: Float, minY: Float, maxX: Float, maxY: Float): Float =
@@ -315,6 +418,34 @@ private fun distToRectEdge(px: Float, py: Float, minX: Float, minY: Float, maxX:
 private fun lineSamples(x0: Float, y0: Float, x1: Float, y1: Float): List<Float> {
     val out = ArrayList<Float>(); val steps = 16
     for (i in 0..steps) { val t = i / steps.toFloat(); out.add(x0 + (x1 - x0) * t); out.add(y0 + (y1 - y0) * t) }
+    return out
+}
+
+/** 三角形采样：A→B→C→A 三条边各均匀取点。 */
+private fun triangleSamples(
+    ax: Float, ay: Float, bx: Float, by: Float, cx: Float, cy: Float,
+): List<Float> {
+    val verts = listOf(ax to ay, bx to by, cx to cy, ax to ay)
+    val out = ArrayList<Float>(); val steps = 12
+    for (k in 0 until verts.size - 1) {
+        val (p0x, p0y) = verts[k]; val (p1x, p1y) = verts[k + 1]
+        for (i in 0..steps) { val t = i / steps.toFloat(); out.add(p0x + (p1x - p0x) * t); out.add(p0y + (p1y - p0y) * t) }
+    }
+    return out
+}
+
+/** 箭头采样：主干 s→t，再画两条箭翼 t→w1、回到 t、t→w2。 */
+private fun arrowSamples(
+    sx: Float, sy: Float, tx: Float, ty: Float,
+    w1x: Float, w1y: Float, w2x: Float, w2y: Float,
+): List<Float> {
+    val out = ArrayList<Float>()
+    val steps = 16
+    for (i in 0..steps) { val t = i / steps.toFloat(); out.add(sx + (tx - sx) * t); out.add(sy + (ty - sy) * t) }
+    val wing = 6
+    for (i in 0..wing) { val t = i / wing.toFloat(); out.add(tx + (w1x - tx) * t); out.add(ty + (w1y - ty) * t) }
+    for (i in 0..wing) { val t = i / wing.toFloat(); out.add(w1x + (tx - w1x) * t); out.add(w1y + (ty - w1y) * t) }
+    for (i in 0..wing) { val t = i / wing.toFloat(); out.add(tx + (w2x - tx) * t); out.add(ty + (w2y - ty) * t) }
     return out
 }
 
@@ -402,6 +533,8 @@ fun CanvasScreen(
     val liveWidths = remember { mutableStateListOf<Float>() }
     var eraseCursor by remember { mutableStateOf<Offset?>(null) }
     var pendingErase by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // 一笔成形：仅当书写末端停顿后才规整。shapePreview 非空 = 已达成停顿且识别成功的规整点（世界坐标扁平 [x,y,...]）
+    var shapePreview by remember { mutableStateOf<List<Float>?>(null) }
     // 分层渲染：已落墨内容烘焙为位图（书写时每帧只画位图+当前一笔）
     var inkLayer by remember { mutableStateOf<Pair<ImageBitmap, BakeStamp>?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -587,6 +720,11 @@ fun CanvasScreen(
                             var lastTime = down.uptimeMillis
                             var penW = baseW * 0.65f // 起笔渐入
                             var multiTouch = false
+                            // 一笔成形「停顿确认」：跟踪最近一次明显移动的时间；末端原地停顿 ≥350ms 才规整
+                            var lastMoveTime = down.uptimeMillis
+                            var dwellAnchor = down.position
+                            var dwellReady = false
+                            if (tool == CanvasTool.SHAPE) shapePreview = null
                             if (!fingerPansOnly) {
                                 livePoints.clear(); liveWidths.clear()
                                 livePoints.add(screenToWorld(down.position)); liveWidths.add(penW)
@@ -600,6 +738,7 @@ fun CanvasScreen(
                                 if (pressed.size >= 2) {
                                     multiTouch = true
                                     livePoints.clear(); liveWidths.clear()
+                                    shapePreview = null
                                     eraseCursor = null; pendingErase = emptySet()
                                     while (true) {
                                         val ev = awaitPointerEvent()
@@ -634,6 +773,21 @@ fun CanvasScreen(
                                     lastPos = ch.position; lastTime = ch.uptimeMillis
                                     val w = screenToWorld(ch.position)
                                     livePoints.add(w); liveWidths.add(penW)
+                                    if (tool == CanvasTool.SHAPE) {
+                                        // 末端原地停顿检测：位移超阈值则重置停顿锚点，否则累计停留时长
+                                        if ((ch.position - dwellAnchor).getDistance() > 6f) {
+                                            dwellAnchor = ch.position
+                                            lastMoveTime = ch.uptimeMillis
+                                            if (dwellReady) { dwellReady = false; shapePreview = null }
+                                        } else if (!dwellReady && ch.uptimeMillis - lastMoveTime >= 350L) {
+                                            // 停顿达成：尝试规整，成功则切换实时预览为规整形状
+                                            val snap = ArrayList<Float>(livePoints.size * 2)
+                                            livePoints.forEach { snap.add(it.x); snap.add(it.y) }
+                                            val shaped = recognizeShape(snap)
+                                            if (shaped != null) { shapePreview = shaped; dwellReady = true }
+                                            else lastMoveTime = ch.uptimeMillis // 识别失败，重置等下一次停顿
+                                        }
+                                    }
                                     if (tool == CanvasTool.ERASER) {
                                         eraseCursor = ch.position
                                         // 实时命中灰显：先标记，抬手才删
@@ -656,11 +810,12 @@ fun CanvasScreen(
                                         pendingErase = emptySet()
                                     }
                                     CanvasTool.SHAPE -> viewModel.addStroke(
+                                        // 仅当末端停顿达成（dwellReady 且识别成功）才落规整形状；否则保留原始手绘
                                         StrokeElement(
                                             tool = "pen",
                                             color = color.copy(alpha = opacity).toArgb(),
                                             width = width,
-                                            points = recognizeShape(flat) ?: flat,
+                                            points = (if (dwellReady) shapePreview else null) ?: flat,
                                         )
                                     )
                                     else -> {
@@ -681,6 +836,7 @@ fun CanvasScreen(
                                 }
                             }
                             livePoints.clear(); liveWidths.clear()
+                            shapePreview = null
                         }
                     }
                 }
@@ -746,9 +902,17 @@ fun CanvasScreen(
                         when (tool) {
                             CanvasTool.ERASER -> Unit // 橡皮用屏幕光标提示，不画白线
                             CanvasTool.SHAPE -> {
+                                // 停顿达成后预览切换为规整形状（shapePreview），否则画原始手绘
+                                val preview = shapePreview
                                 val path = Path().apply {
-                                    moveTo(livePoints.first().x, livePoints.first().y)
-                                    for (i in 1 until livePoints.size) lineTo(livePoints[i].x, livePoints[i].y)
+                                    if (preview != null && preview.size >= 4) {
+                                        moveTo(preview[0], preview[1])
+                                        var i = 2
+                                        while (i + 1 < preview.size) { lineTo(preview[i], preview[i + 1]); i += 2 }
+                                    } else {
+                                        moveTo(livePoints.first().x, livePoints.first().y)
+                                        for (i in 1 until livePoints.size) lineTo(livePoints[i].x, livePoints[i].y)
+                                    }
                                 }
                                 drawPath(
                                     path, color = color.copy(alpha = opacity),
