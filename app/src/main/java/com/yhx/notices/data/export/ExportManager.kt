@@ -207,7 +207,7 @@ class ExportManager @Inject constructor(
         val line = Paint().apply { color = P.LINE; isAntiAlias = true; strokeWidth = 1f }
         val major = Paint().apply { color = P.LINE_MAJOR; isAntiAlias = true; strokeWidth = 1f }
         val margin = Paint().apply { color = P.MARGIN_RED; isAntiAlias = true; strokeWidth = 1.5f }
-        val dot = Paint().apply { color = P.LINE; isAntiAlias = true; style = Paint.Style.FILL }
+        val dot = Paint().apply { color = P.LINE; isAntiAlias = true; this.style = Paint.Style.FILL }
         val sp = P.BASE_SPACING
         val big = P.GRID_SPACING
 
