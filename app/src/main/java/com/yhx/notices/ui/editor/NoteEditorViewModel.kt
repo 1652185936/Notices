@@ -70,20 +70,44 @@ class NoteEditorViewModel @Inject constructor(
 
     private data class Snapshot(val title: String, val blocks: List<Block>)
 
-    init { load() }
+    var isLocked by mutableStateOf(false); private set
+    var encrypted by mutableStateOf(false); private set
 
-    private fun load() {
+    init { boot() }
+
+    private fun boot() {
         viewModelScope.launch {
-            val note = noteRepo.getNote(noteId)
-            if (note != null) {
-                loaded = note
-                title = note.title
-                isPinned = note.isPinned
-                isFavorite = note.isFavorite
-                blocks.clear()
-                blocks.addAll(note.content.blocks)
-                focusedBlockId = blocks.firstOrNull()?.id
-            }
+            encrypted = noteRepo.isEncrypted(noteId)
+            if (encrypted) isLocked = true else loadContent()
+        }
+    }
+
+    fun unlock() {
+        isLocked = false
+        loadContent()
+    }
+
+    private fun loadContent() {
+        viewModelScope.launch {
+            val note = noteRepo.getNote(noteId) ?: return@launch
+            loaded = note
+            title = note.title
+            isPinned = note.isPinned
+            isFavorite = note.isFavorite
+            encrypted = note.isEncrypted
+            blocks.clear()
+            blocks.addAll(note.content.blocks)
+            focusedBlockId = blocks.firstOrNull()?.id
+        }
+    }
+
+    fun toggleEncryption() {
+        viewModelScope.launch {
+            ensureSaved()
+            val target = !encrypted
+            noteRepo.setEncrypted(noteId, target)
+            encrypted = target
+            loaded = loaded?.copy(isEncrypted = target)
         }
     }
 

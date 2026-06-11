@@ -23,7 +23,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -42,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -117,6 +121,10 @@ fun NoteEditorScreen(
                         androidx.compose.material3.DropdownMenuItem(
                             text = { Text(if (viewModel.isFavorite) "取消收藏" else "收藏") },
                             onClick = { viewModel.toggleFavorite(); menuOpen = false },
+                        )
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(if (viewModel.encrypted) "解除加密" else "加密") },
+                            onClick = { viewModel.toggleEncryption(); menuOpen = false },
                         )
                         androidx.compose.material3.DropdownMenuItem(
                             text = { Text("删除") },
@@ -195,6 +203,48 @@ fun NoteEditorScreen(
                 onCancel = { viewModel.cancelRecording() },
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
+        }
+
+        if (viewModel.isLocked) {
+            LockScreen(onUnlock = viewModel::unlock, onBack = onBack)
+        }
+    }
+}
+
+@Composable
+private fun LockScreen(onUnlock: () -> Unit, onBack: () -> Unit) {
+    val activity = androidx.compose.ui.platform.LocalContext.current as? androidx.fragment.app.FragmentActivity
+    fun auth() {
+        activity?.let {
+            com.yhx.notices.ui.security.BiometricAuth.authenticate(
+                it, "笔记已加密", "请验证身份后查看",
+                onSuccess = onUnlock, onError = {},
+            )
+        }
+    }
+    LaunchedEffect(Unit) { auth() }
+    androidx.compose.material3.Surface(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(
+                Icons.Default.Lock,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(48.dp),
+            )
+            Text(
+                "此笔记已加密",
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+            androidx.compose.material3.Button(
+                onClick = { auth() },
+                modifier = Modifier.padding(top = 16.dp),
+            ) { Text("解锁查看") }
+            androidx.compose.material3.TextButton(onClick = onBack) { Text("返回") }
         }
     }
 }
@@ -390,8 +440,7 @@ private fun AudioBlockView(block: AudioBlock, vm: NoteEditorViewModel) {
                 vm.playAudio(block.attachmentId) { playing = false }
             }) {
                 Icon(
-                    if (playing) androidx.compose.material.icons.Icons.Default.GraphicEq
-                    else androidx.compose.material.icons.Icons.Default.PlayArrow,
+                    if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
                     contentDescription = "播放",
                     tint = MaterialTheme.colorScheme.primary,
                 )

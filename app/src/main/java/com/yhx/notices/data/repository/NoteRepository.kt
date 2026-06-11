@@ -84,6 +84,25 @@ class NoteRepository @Inject constructor(
         return attachmentDao.getById(imageBlock.attachmentId)?.fileName
     }
 
+    suspend fun isEncrypted(id: Long): Boolean = noteDao.getById(id)?.isEncrypted == true
+
+    /** 切换加密：解密/重新加密内容并落库。 */
+    suspend fun setEncrypted(id: Long, encrypt: Boolean) {
+        val e = noteDao.getById(id) ?: return
+        if (e.isEncrypted == encrypt) return
+        val plainJson = if (e.isEncrypted) (crypto.decrypt(e.contentJson) ?: return) else e.contentJson
+        val storedJson = if (encrypt) crypto.encrypt(plainJson) else plainJson
+        val content = RichTextJson.decode(plainJson) ?: NoteContent.empty()
+        noteDao.update(
+            e.copy(
+                contentJson = storedJson,
+                isEncrypted = encrypt,
+                plainText = if (encrypt) "" else ContentDerive.plainText(content),
+                updatedAt = System.currentTimeMillis(),
+            )
+        )
+    }
+
     suspend fun moveToTrash(ids: List<Long>) = noteDao.softDelete(ids, System.currentTimeMillis())
     suspend fun restore(ids: List<Long>) = noteDao.restore(ids)
     suspend fun purge(ids: List<Long>) = noteDao.purge(ids)
