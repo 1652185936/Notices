@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -521,7 +520,6 @@ fun CanvasScreen(
     var palmBlock by remember { mutableStateOf(false) }
     var minimapOn by remember { mutableStateOf(true) }
     var opacity by remember { mutableStateOf(1f) }
-    var trayVisible by remember { mutableStateOf(true) }
 
     // 选笔：换笔即切换并收起设置；再点已选中的笔 = 开关笔刷设置浮层
     val selectTool: (CanvasTool) -> Unit = { t ->
@@ -616,6 +614,7 @@ fun CanvasScreen(
                 onBack = { viewModel.onExit(); onBack() },
                 tool = tool,
                 onTool = selectTool,
+                penColor = color,
                 canUndo = viewModel.canUndo,
                 onUndo = viewModel::undo,
                 canRedo = viewModel.canRedo,
@@ -1110,25 +1109,26 @@ fun CanvasScreen(
                 }
             }
 
-            // 笔刷面板：从托盘上方轻缩放+渐显弹出
+            // 笔刷设置浮层：从顶部工具栏下方轻缩放+渐显落下（拟物真笔只在此弹框出现）
             androidx.compose.animation.AnimatedVisibility(
                 visible = showBrushPanel,
                 enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(150)) +
                     androidx.compose.animation.scaleIn(
                         animationSpec = androidx.compose.animation.core.tween(180),
                         initialScale = 0.9f,
-                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f),
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f),
                     ),
                 exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(120)) +
                     androidx.compose.animation.scaleOut(
                         animationSpec = androidx.compose.animation.core.tween(140),
                         targetScale = 0.94f,
-                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f),
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f),
                     ),
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 116.dp),
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
             ) {
                 BrushPanel(
                     tool = tool,
+                    // 弹框内换笔：切换工具但保持弹框打开
                     onTool = { tool = it },
                     color = color,
                     onColor = { color = it },
@@ -1139,20 +1139,6 @@ fun CanvasScreen(
                     onClose = { showBrushPanel = false },
                 )
             }
-
-            // 拟物笔托盘（可收起）
-            PenTray(
-                tool = tool,
-                onTool = selectTool,
-                color = color,
-                onColor = { color = it },
-                width = width,
-                onWidth = { width = it },
-                expanded = trayVisible,
-                onToggleExpanded = { trayVisible = !trayVisible; if (!trayVisible) showBrushPanel = false },
-                onOpenSettings = { showBrushPanel = !showBrushPanel },
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
-            )
         }
     }
 }
@@ -1425,13 +1411,7 @@ private val trayPens by lazy {
     )
 }
 
-/** 托盘快捷色（2×5）。 */
-private val trayColors = listOf(
-    Color(0xFF182431), Color(0xFF007DFF), Color(0xFFFA2A2D), Color(0xFF21A675), Color(0xFFFFBB00),
-    Color(0xFF722ED1), Color(0xFFFF7500), Color(0xFFEB2F96), Color(0xFF8B4513), Color(0xFFFFFFFF),
-)
-
-/** 托盘三档笔号。 */
+/** 弹框三档快捷笔号。 */
 private val traySizes = listOf(4f, 8f, 14f)
 
 /** 无界笔记顶部栏：标题行 + 工具行（对照华为平板真机布局）。 */
@@ -1442,6 +1422,7 @@ private fun HwCanvasTopBar(
     onBack: () -> Unit,
     tool: CanvasTool,
     onTool: (CanvasTool) -> Unit,
+    penColor: Color,
     canUndo: Boolean,
     onUndo: () -> Unit,
     canRedo: Boolean,
@@ -1536,6 +1517,14 @@ private fun HwCanvasTopBar(
                 HwToolButton(HwIcons.Lasso, CanvasTool.LASSO, tool, c, onTool)
                 HwToolButton(HwIcons.TextBox, CanvasTool.TEXT, tool, c, onTool)
                 HwToolDivider(c)
+                // 笔具组（单色线性图标，选中淡蓝圆底；当前书写笔带颜色小点）
+                HwPenToolButton(HwIcons.Fountain, CanvasTool.FOUNTAIN, tool, c, penColor, onTool)
+                HwPenToolButton(HwIcons.Pen, CanvasTool.PEN, tool, c, penColor, onTool)
+                HwPenToolButton(HwIcons.Pencil, CanvasTool.PENCIL, tool, c, penColor, onTool)
+                HwPenToolButton(HwIcons.Marker, CanvasTool.MARKER, tool, c, penColor, onTool)
+                HwPenToolButton(HwIcons.Highlighter, CanvasTool.HIGHLIGHTER, tool, c, penColor, onTool)
+                HwToolButton(HwIcons.Eraser, CanvasTool.ERASER, tool, c, onTool)
+                HwToolDivider(c)
                 HwToolButton(HwIcons.ShapeRecog, CanvasTool.SHAPE, tool, c, onTool)
                 HwToolIcon(HwIcons.Palm, "防误触", c, active = palmBlock, onClick = onTogglePalm)
                 var paperOpen by remember { mutableStateOf(false) }
@@ -1604,6 +1593,45 @@ private fun HwToolButton(
     }
 }
 
+/** 工具行笔具按钮：与 HwToolButton 同款选中淡蓝圆底，选中时右下角带当前笔色小点。 */
+@Composable
+private fun HwPenToolButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    t: CanvasTool,
+    current: CanvasTool,
+    c: HwBarColors,
+    penColor: Color,
+    onTool: (CanvasTool) -> Unit,
+) {
+    val selected = current == t
+    val bg by androidx.compose.animation.animateColorAsState(
+        if (selected) c.selBg else Color.Transparent,
+        androidx.compose.animation.core.tween(160), label = "penToolBg",
+    )
+    Box(
+        Modifier
+            .padding(horizontal = 2.dp)
+            .size(38.dp)
+            .clip(CircleShape)
+            .background(bg)
+            .androidx_clickable { onTool(t) },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, t.label, tint = c.ink, modifier = Modifier.size(22.dp))
+        if (selected) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(4.dp)
+                    .size(7.dp)
+                    .clip(CircleShape)
+                    .background(penColor)
+                    .border(0.5.dp, Color(0x33000000), CircleShape),
+            )
+        }
+    }
+}
+
 /** 工具行功能图标（无工具态；可禁用/可激活高亮）。 */
 @Composable
 private fun HwToolIcon(
@@ -1632,121 +1660,9 @@ private fun HwToolDivider(c: HwBarColors) {
     Box(Modifier.padding(horizontal = 7.dp).width(1.dp).height(20.dp).background(c.hairline))
 }
 
-/* ====================== 拟物笔托盘 ====================== */
+/* ====================== 拟物笔（弹框内复用） ====================== */
 
-/** 底部笔托盘：拟物笔插画（选中上浮）+ 快捷色板 + 三档笔号 + 设置入口，可收起为把手。 */
-@Composable
-private fun PenTray(
-    tool: CanvasTool,
-    onTool: (CanvasTool) -> Unit,
-    color: Color,
-    onColor: (Color) -> Unit,
-    width: Float,
-    onWidth: (Float) -> Unit,
-    expanded: Boolean,
-    onToggleExpanded: () -> Unit,
-    onOpenSettings: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val dark = isSystemInDarkTheme()
-    val bg = if (dark) Color(0xFF2A2C2E) else Color.White
-    val ink = if (dark) Color(0xFFE6E8EA) else Color(0xFF1B1D1F)
-    Box(modifier, contentAlignment = Alignment.BottomCenter) {
-        androidx.compose.animation.AnimatedVisibility(
-            visible = expanded,
-            enter = androidx.compose.animation.slideInVertically(initialOffsetY = { it }) +
-                androidx.compose.animation.fadeIn(),
-            exit = androidx.compose.animation.slideOutVertically(targetOffsetY = { it }) +
-                androidx.compose.animation.fadeOut(),
-        ) {
-            Surface(shape = RoundedCornerShape(18.dp), color = bg, shadowElevation = 14.dp) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    // 收起把手
-                    Box(
-                        Modifier
-                            .padding(top = 5.dp)
-                            .size(width = 56.dp, height = 12.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .androidx_clickable(onToggleExpanded),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Box(Modifier.size(width = 34.dp, height = 4.dp).background(Color(0xFFC9CDD4), RoundedCornerShape(2.dp)))
-                    }
-                    Row(
-                        Modifier.height(74.dp).padding(horizontal = 18.dp),
-                        verticalAlignment = Alignment.Bottom,
-                    ) {
-                        // 笔位（底部裁切：未选中的笔「插」在托盘里）
-                        Row(Modifier.clipToBounds(), verticalAlignment = Alignment.Bottom) {
-                            trayPens.forEach { (t, art) -> PenSlot(art, t, tool, onTool) }
-                        }
-                        Box(
-                            Modifier
-                                .padding(horizontal = 14.dp)
-                                .align(Alignment.CenterVertically)
-                                .size(width = 1.dp, height = 44.dp)
-                                .background(Color(0x1F000000)),
-                        )
-                        // 快捷色 2×5
-                        Column(
-                            Modifier.align(Alignment.CenterVertically),
-                            verticalArrangement = Arrangement.spacedBy(7.dp),
-                        ) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                trayColors.take(5).forEach { tc -> ColorSquare(tc, tc == color, onColor) }
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                trayColors.drop(5).forEach { tc -> ColorSquare(tc, tc == color, onColor) }
-                            }
-                        }
-                        Box(
-                            Modifier
-                                .padding(horizontal = 14.dp)
-                                .align(Alignment.CenterVertically)
-                                .size(width = 1.dp, height = 44.dp)
-                                .background(Color(0x1F000000)),
-                        )
-                        // 三档笔号
-                        Row(Modifier.align(Alignment.CenterVertically), verticalAlignment = Alignment.CenterVertically) {
-                            traySizes.forEach { s -> SizeDot(s, s == width, ink, onWidth) }
-                        }
-                        // 笔刷设置入口
-                        Icon(
-                            HwIcons.Back, "笔刷设置", tint = ink,
-                            modifier = Modifier
-                                .align(Alignment.CenterVertically)
-                                .padding(start = 8.dp)
-                                .size(30.dp)
-                                .clip(CircleShape)
-                                .androidx_clickable(onOpenSettings)
-                                .padding(6.dp)
-                                .rotate(90f),
-                        )
-                    }
-                }
-            }
-        }
-        // 收起后的恢复把手
-        if (!expanded) {
-            Surface(
-                shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
-                color = bg,
-                shadowElevation = 10.dp,
-            ) {
-                Box(
-                    Modifier
-                        .size(width = 96.dp, height = 20.dp)
-                        .androidx_clickable(onToggleExpanded),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(Modifier.size(width = 34.dp, height = 4.dp).background(Color(0xFFC9CDD4), RoundedCornerShape(2.dp)))
-                }
-            }
-        }
-    }
-}
-
-/** 托盘中的一支笔：选中上浮、未选中插回托盘。 */
+/** 弹框中的一支拟物笔：选中上浮、未选中插回。 */
 @Composable
 private fun PenSlot(
     art: androidx.compose.ui.graphics.vector.ImageVector,
@@ -1770,24 +1686,7 @@ private fun PenSlot(
     )
 }
 
-/** 托盘快捷色方块。 */
-@Composable
-private fun ColorSquare(c: Color, selected: Boolean, onColor: (Color) -> Unit) {
-    Box(
-        Modifier
-            .size(18.dp)
-            .clip(RoundedCornerShape(5.dp))
-            .background(c)
-            .border(
-                width = if (selected) 2.dp else 0.5.dp,
-                color = if (selected) Color(0xFF007DFF) else Color(0x26000000),
-                shape = RoundedCornerShape(5.dp),
-            )
-            .androidx_clickable { onColor(c) },
-    )
-}
-
-/** 托盘笔号档位（圆点大小示意笔粗）。 */
+/** 弹框笔号档位（圆点大小示意笔粗）。 */
 @Composable
 private fun SizeDot(s: Float, selected: Boolean, ink: Color, onWidth: (Float) -> Unit) {
     Box(
@@ -1884,6 +1783,22 @@ private fun BrushPanel(
                     HwIcons.Close, "关闭", tint = c.ink,
                     modifier = Modifier.size(30.dp).clip(CircleShape).androidx_clickable(onClose).padding(5.dp),
                 )
+            }
+            // 拟物真笔一行（选中上浮，tint=Unspecified 保留多色插画）
+            Row(
+                Modifier.fillMaxWidth().height(70.dp).clipToBounds().padding(top = 4.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                trayPens.forEach { (t, art) -> PenSlot(art, t, tool, onTool) }
+            }
+            // 三档快捷笔号
+            Row(
+                Modifier.fillMaxWidth().padding(top = 4.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                traySizes.forEach { s -> SizeDot(s, s == width, c.ink, onWidth) }
             }
             // 粗细
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 10.dp)) {

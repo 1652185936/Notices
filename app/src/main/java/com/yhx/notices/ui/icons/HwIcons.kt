@@ -101,6 +101,24 @@ object HwIcons {
         }
     }
 
+    /** 钢笔（斜置笔杆 + 尖钢笔尖 + 中缝） */
+    val Fountain: ImageVector by lazy {
+        hwIcon("Hw.Fountain") {
+            stroke("M14.2,5.6 L18.4,9.8 L11.3,16.9 L6.2,18.4 L7.7,13.3 Z")
+            stroke("M7.7,13.3 L11.3,16.9")
+            stroke("M9.5,15.1 L13.1,8.7", 1.3f)
+        }
+    }
+
+    /** 荧光笔（斜置粗杆 + 斜方头 + 笔迹下划） */
+    val Highlighter: ImageVector by lazy {
+        hwIcon("Hw.Highlighter") {
+            stroke("M14.1,4.9 L19.1,9.9 L11.5,17.5 L7.2,17.5 L6.5,13.2 Z")
+            stroke("M7.2,17.5 L6.5,13.2")
+            stroke("M5,20 H13", 1.8f)
+        }
+    }
+
     /** 铅笔（笔身 + 削尖 + 笔芯） */
     val Pencil: ImageVector by lazy {
         hwIcon("Hw.Pencil") {
