@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.FormatStrikethrough
 import androidx.compose.material.icons.filled.FormatUnderlined
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.KeyboardVoice
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Title
@@ -106,6 +107,7 @@ fun InsertBar(
     onChecklist: () -> Unit,
     onSketch: () -> Unit,
     onAudio: () -> Unit,
+    onVoice: () -> Unit,
     onTable: () -> Unit,
     onDivider: () -> Unit,
 ) {
@@ -127,6 +129,9 @@ fun InsertBar(
             }
             IconButton(onClick = onAudio) {
                 Icon(Icons.Default.Mic, contentDescription = "录音")
+            }
+            IconButton(onClick = onVoice) {
+                Icon(Icons.Default.KeyboardVoice, contentDescription = "语音转文字")
             }
             IconButton(onClick = onTable) {
                 Icon(Icons.Default.GridOn, contentDescription = "表格")

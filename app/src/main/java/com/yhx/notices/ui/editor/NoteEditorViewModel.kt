@@ -194,6 +194,22 @@ class NoteEditorViewModel @Inject constructor(
         markDirty()
     }
 
+    /** 在当前焦点块光标处插入文字（语音转写用）。 */
+    fun insertText(text: String) {
+        if (text.isEmpty()) return
+        val blockId = focusedBlockId ?: blocks.firstOrNull()?.id ?: return
+        val i = blocks.indexOfFirst { it.id == blockId }
+        if (i < 0) return
+        val spans = spansOf(blocks[i]) ?: return
+        val cur = SpanOps.text(spans)
+        val at = selection.min.coerceIn(0, cur.length)
+        val newText = cur.substring(0, at) + text + cur.substring(at)
+        pushUndo()
+        blocks[i] = withSpans(blocks[i], SpanOps.applyTextChange(spans, newText, stickyStyles))
+        selection = TextRange(at + text.length)
+        markDirty()
+    }
+
     fun applyStyle(style: String) {
         val blockId = focusedBlockId ?: return
         val index = blocks.indexOfFirst { it.id == blockId }

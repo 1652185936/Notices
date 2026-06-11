@@ -97,6 +97,44 @@ fun NoteEditorScreen(
     var showSketch by remember { mutableStateOf(false) }
     var viewerPath by remember { mutableStateOf<String?>(null) }
 
+    // 语音转文字（系统 SpeechRecognizer）
+    val recognizer = remember {
+        if (android.speech.SpeechRecognizer.isRecognitionAvailable(context))
+            android.speech.SpeechRecognizer.createSpeechRecognizer(context) else null
+    }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { recognizer?.destroy() }
+    }
+    fun startVoice() {
+        if (recognizer == null) {
+            android.widget.Toast.makeText(context, "设备不支持语音识别", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        recognizer.setRecognitionListener(object : android.speech.RecognitionListener {
+            override fun onResults(results: android.os.Bundle) {
+                results.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull()?.let { viewModel.insertText(it) }
+            }
+            override fun onError(error: Int) {}
+            override fun onReadyForSpeech(params: android.os.Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onPartialResults(partialResults: android.os.Bundle?) {}
+            override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
+        })
+        val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
+        }
+        android.widget.Toast.makeText(context, "请开始说话…", android.widget.Toast.LENGTH_SHORT).show()
+        recognizer.startListening(intent)
+    }
+    val voicePermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> if (granted) startVoice() }
+
     Box(Modifier.fillMaxSize()) {
     Scaffold(
         topBar = {
@@ -182,6 +220,13 @@ fun NoteEditorScreen(
                     onAudio = {
                         if (viewModel.isRecording) viewModel.stopRecordingAndInsert()
                         else audioPermission.launch(android.Manifest.permission.RECORD_AUDIO)
+                    },
+                    onVoice = {
+                        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                                context, android.Manifest.permission.RECORD_AUDIO
+                            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        ) startVoice()
+                        else voicePermission.launch(android.Manifest.permission.RECORD_AUDIO)
                     },
                     onTable = viewModel::insertTable,
                     onDivider = viewModel::insertDivider,
