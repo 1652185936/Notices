@@ -75,15 +75,49 @@ class NoteListViewModel @Inject constructor(
 
     suspend fun createCanvasNote(): Long = noteRepo.createNote(currentFolderId.value, isCanvas = true)
 
-    fun deleteSelected() {
+    private var lastDeleted: List<Long> = emptyList()
+
+    fun deleteSelected(onDeleted: (Int) -> Unit) {
         val ids = selection.value.toList()
         if (ids.isEmpty()) return
-        viewModelScope.launch { noteRepo.moveToTrash(ids); clearSelection() }
+        lastDeleted = ids
+        viewModelScope.launch { noteRepo.moveToTrash(ids); clearSelection(); onDeleted(ids.size) }
+    }
+
+    fun undoDelete() {
+        val ids = lastDeleted
+        if (ids.isNotEmpty()) viewModelScope.launch { noteRepo.restore(ids); lastDeleted = emptyList() }
     }
 
     fun pinSelected() {
         val ids = selection.value.toList()
         viewModelScope.launch { noteRepo.setPinned(ids, true); clearSelection() }
+    }
+
+    fun favoriteSelected() {
+        val ids = selection.value.toList()
+        viewModelScope.launch { noteRepo.setFavorite(ids, true); clearSelection() }
+    }
+
+    fun moveSelectedToFolder(folderId: Long?) {
+        val ids = selection.value.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch { noteRepo.moveToFolder(ids, folderId); clearSelection() }
+    }
+
+    fun renameFolder(folder: com.yhx.notices.data.local.entity.FolderEntity, name: String) {
+        viewModelScope.launch { folderRepo.rename(folder, name) }
+    }
+
+    fun recolorFolder(folder: com.yhx.notices.data.local.entity.FolderEntity, color: Int) {
+        viewModelScope.launch { folderRepo.recolor(folder, color) }
+    }
+
+    fun deleteFolder(folder: com.yhx.notices.data.local.entity.FolderEntity) {
+        viewModelScope.launch {
+            if (currentFolderId.value == folder.id) currentFolderId.value = null
+            folderRepo.delete(folder)
+        }
     }
 
     fun toggleLayout() {
