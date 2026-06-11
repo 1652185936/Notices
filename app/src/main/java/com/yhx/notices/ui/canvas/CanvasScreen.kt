@@ -26,26 +26,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Undo
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Brush
-import androidx.compose.material.icons.filled.Category
-import androidx.compose.material.icons.filled.CleaningServices
-import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.EmojiEmotions
-import androidx.compose.material.icons.filled.Gesture
-import androidx.compose.material.icons.filled.GridOn
-import androidx.compose.material.icons.filled.HighlightAlt
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PanTool
-import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material.icons.filled.TextFields
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -74,9 +65,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.material.icons.filled.Height
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.IntOffset
@@ -87,6 +79,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.yhx.notices.domain.canvas.ImageElement
 import com.yhx.notices.domain.canvas.StrokeElement
 import com.yhx.notices.domain.canvas.TextElement
+import com.yhx.notices.ui.icons.HwIcons
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -95,8 +88,8 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 enum class CanvasTool(val label: String) {
-    MOVE("移动"), SELECT("选择"), LASSO("套索"), PEN("钢笔"), PENCIL("铅笔"),
-    HIGHLIGHTER("荧光笔"), SHAPE("形状"), ERASER("橡皮"), TEXT("文字")
+    MOVE("移动"), SELECT("选择"), LASSO("套索"), PEN("秀丽笔"), PENCIL("铅笔"),
+    HIGHLIGHTER("荧光笔"), SHAPE("一笔成形"), ERASER("橡皮"), TEXT("文字")
 }
 
 /** 射线法判断点是否在多边形（扁平 x,y 序列）内。 */
@@ -352,7 +345,6 @@ private val palette = listOf(
     Color(0xFF182431), Color(0xFFFA2A2D), Color(0xFFFF7500), Color(0xFF21A675),
     Color(0xFF007DFF), Color(0xFF4C2FBF), Color(0xFF8E8E93),
 )
-private val widths = listOf(3f, 6f, 12f, 20f)
 private val penTools = setOf(CanvasTool.PEN, CanvasTool.PENCIL, CanvasTool.HIGHLIGHTER)
 
 /** 取色网格调色板（华为为 100+，此处精选 36 色）。 */
@@ -385,6 +377,9 @@ fun CanvasScreen(
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     var showStickers by remember { mutableStateOf(false) }
     var showBrushPanel by remember { mutableStateOf(false) }
+    var palmBlock by remember { mutableStateOf(false) }
+    var minimapOn by remember { mutableStateOf(true) }
+    var opacity by remember { mutableStateOf(1f) }
 
     val livePoints = remember { mutableStateListOf<Offset>() }
     val bitmaps = remember { mutableStateMapOf<Long, ImageBitmap?>() }
@@ -416,107 +411,68 @@ fun CanvasScreen(
         }
     }
 
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     Scaffold(
         topBar = {
-            TopAppBar(
-                navigationIcon = {
-                    IconButton(onClick = { viewModel.onExit(); onBack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+            HwCanvasTopBar(
+                title = viewModel.title,
+                onTitleChange = viewModel::onTitleChange,
+                onBack = { viewModel.onExit(); onBack() },
+                tool = tool,
+                onTool = { t ->
+                    if (t == tool && t in penTools) showBrushPanel = !showBrushPanel
+                    else { tool = t; showBrushPanel = t in penTools }
+                },
+                canUndo = viewModel.canUndo,
+                onUndo = viewModel::undo,
+                canRedo = viewModel.canRedo,
+                onRedo = viewModel::redo,
+                palmBlock = palmBlock,
+                onTogglePalm = { palmBlock = !palmBlock },
+                background = viewModel.background,
+                onBackground = viewModel::changeBackground,
+                width = width,
+                onWidth = { width = it },
+                color = color,
+                onColor = { color = it },
+                minimapOn = minimapOn,
+                onToggleMinimap = { minimapOn = !minimapOn },
+                onInsertImage = {
+                    imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                },
+                onInsertSticker = { showStickers = true },
+                onInsertSpace = {
+                    val cy = screenToWorld(Offset(canvasSize.width / 2f, canvasSize.height / 2f)).y
+                    viewModel.insertVerticalSpace(cy, 400f)
+                },
+                onShareImage = {
+                    viewModel.shareAsImage { uri ->
+                        uri?.let { com.yhx.notices.ui.editor.shareUri(ctx, it, "image/png") }
                     }
                 },
-                title = {
-                    BasicTextField(
-                        value = viewModel.title,
-                        onValueChange = viewModel::onTitleChange,
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.titleMedium.copy(
-                            color = MaterialTheme.colorScheme.onSurface
-                        ),
-                        decorationBox = { inner ->
-                            if (viewModel.title.isEmpty()) {
-                                Text("无界笔记", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            inner()
-                        },
-                    )
+                onExportGallery = {
+                    viewModel.exportImageToGallery { ok ->
+                        android.widget.Toast.makeText(
+                            ctx, if (ok) "已保存到相册" else "导出失败",
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    }
                 },
-                actions = {
-                    IconButton(onClick = viewModel::cycleBackground) {
-                        Icon(Icons.Default.GridOn, contentDescription = "纸张模板")
-                    }
-                    IconButton(onClick = viewModel::undo, enabled = viewModel.canUndo) {
-                        Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "撤销")
-                    }
-                    var menuOpen by remember { mutableStateOf(false) }
-                    val ctx = androidx.compose.ui.platform.LocalContext.current
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "更多")
-                    }
-                    androidx.compose.material3.DropdownMenu(menuOpen, { menuOpen = false }) {
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text("分享为图片") },
-                            onClick = {
-                                menuOpen = false
-                                viewModel.shareAsImage { uri ->
-                                    uri?.let { com.yhx.notices.ui.editor.shareUri(ctx, it, "image/png") }
-                                }
-                            },
-                        )
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text("导出图片到相册") },
-                            onClick = {
-                                menuOpen = false
-                                viewModel.exportImageToGallery { ok ->
-                                    android.widget.Toast.makeText(
-                                        ctx, if (ok) "已保存到相册" else "导出失败",
-                                        android.widget.Toast.LENGTH_SHORT,
-                                    ).show()
-                                }
-                            },
-                        )
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text("导出 PDF") },
-                            onClick = {
-                                menuOpen = false
-                                viewModel.exportPdf { uri ->
-                                    uri?.let { com.yhx.notices.ui.editor.shareUri(ctx, it, "application/pdf") }
-                                }
-                            },
-                        )
+                onExportPdf = {
+                    viewModel.exportPdf { uri ->
+                        uri?.let { com.yhx.notices.ui.editor.shareUri(ctx, it, "application/pdf") }
                     }
                 },
             )
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-        CanvasToolbar(
-            tool = tool,
-            onTool = { t ->
-                if (t == tool && t in penTools) showBrushPanel = !showBrushPanel
-                else { tool = t; showBrushPanel = t in penTools }
-            },
-            color = color,
-            onOpenBrush = { showBrushPanel = true },
-            scalePercent = (scale * 100).roundToInt(),
-            onZoomIn = { scale = (scale * 1.25f).coerceAtMost(10f) },
-            onZoomOut = { scale = (scale / 1.25f).coerceAtLeast(0.1f) },
-            onReset = { scale = 1f; offset = Offset.Zero },
-            onImage = {
-                imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-            },
-            onInsertSpace = {
-                val cy = screenToWorld(Offset(canvasSize.width / 2f, canvasSize.height / 2f)).y
-                viewModel.insertVerticalSpace(cy, 400f)
-            },
-            onSticker = { showStickers = true },
-        )
         Box(
             Modifier
-                .fillMaxWidth()
-                .weight(1f)
+                .fillMaxSize()
+                .padding(padding)
                 .background(Color.White)
                 .onSizeChanged { canvasSize = it }
-                .pointerInput(tool) {
+                .pointerInput(tool, palmBlock) {
                     when (tool) {
                         CanvasTool.MOVE -> detectTransformGestures { centroid, pan, zoom, _ ->
                             val newScale = (scale * zoom).coerceIn(0.1f, 10f)
@@ -576,14 +532,20 @@ fun CanvasScreen(
                             },
                             onDragEnd = { draggingId = null },
                         )
-                        else -> detectDragGestures(
-                            onDragStart = { p ->
-                                livePoints.clear(); livePoints.add(screenToWorld(p))
-                            },
-                            onDrag = { change, _ ->
-                                livePoints.add(screenToWorld(change.position)); change.consume()
-                            },
-                            onDragEnd = {
+                        else -> awaitEachGesture {
+                            val down = awaitFirstDown()
+                            if (palmBlock && down.type != PointerType.Stylus) {
+                                // 防误触开启：手指只平移画布，仅手写笔可书写
+                                drag(down.id) { change ->
+                                    offset += change.positionChange()
+                                    change.consume()
+                                }
+                            } else {
+                                livePoints.clear(); livePoints.add(screenToWorld(down.position))
+                                down.consume()
+                                drag(down.id) { change ->
+                                    livePoints.add(screenToWorld(change.position)); change.consume()
+                                }
                                 if (livePoints.size >= 1) {
                                     val flat = ArrayList<Float>(livePoints.size * 2)
                                     livePoints.forEach { flat.add(it.x); flat.add(it.y) }
@@ -592,7 +554,7 @@ fun CanvasScreen(
                                         CanvasTool.SHAPE -> viewModel.addStroke(
                                             StrokeElement(
                                                 tool = "pen",
-                                                color = color.toArgb(),
+                                                color = color.copy(alpha = opacity).toArgb(),
                                                 width = width,
                                                 points = recognizeShape(flat) ?: flat,
                                             )
@@ -600,7 +562,7 @@ fun CanvasScreen(
                                         else -> viewModel.addStroke(
                                             StrokeElement(
                                                 tool = tool.name.lowercase(),
-                                                color = strokeColor(tool, color).toArgb(),
+                                                color = strokeColor(tool, color, opacity).toArgb(),
                                                 width = strokeWidth(tool, width),
                                                 points = flat,
                                             )
@@ -608,8 +570,8 @@ fun CanvasScreen(
                                     }
                                 }
                                 livePoints.clear()
-                            },
-                        )
+                            }
+                        }
                     }
                 }
         ) {
@@ -691,7 +653,7 @@ fun CanvasScreen(
                             for (i in 1 until livePoints.size) lineTo(livePoints[i].x, livePoints[i].y)
                         }
                         drawPath(
-                            path, color = strokeColor(tool, color),
+                            path, color = strokeColor(tool, color, opacity),
                             style = Stroke(strokeWidth(tool, width), cap = StrokeCap.Round, join = StrokeJoin.Round),
                         )
                     }
@@ -724,8 +686,25 @@ fun CanvasScreen(
                 }
             }
 
+            // 缩放指示胶囊（点按恢复 100%）
+            Surface(
+                modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = Color(0xC0F1F3F5),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x14000000)),
+            ) {
+                Text(
+                    "${(scale * 100).roundToInt()}%",
+                    fontSize = 12.sp,
+                    color = Color(0xFF4A4D50),
+                    modifier = Modifier
+                        .androidx_clickable { scale = 1f; offset = Offset.Zero }
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                )
+            }
+
             // 缩略图导航（小地图）
-            if (viewModel.elements.isNotEmpty() && canvasSize.width > 0) {
+            if (minimapOn && viewModel.elements.isNotEmpty() && canvasSize.width > 0) {
                 val tl = screenToWorld(Offset.Zero)
                 val br = screenToWorld(Offset(canvasSize.width.toFloat(), canvasSize.height.toFloat()))
                 Minimap(
@@ -778,11 +757,12 @@ fun CanvasScreen(
                     onColor = { color = it },
                     width = width,
                     onWidth = { width = it },
+                    opacity = opacity,
+                    onOpacity = { opacity = it },
                     onClose = { showBrushPanel = false },
-                    modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+                    modifier = Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 4.dp),
                 )
             }
-        }
         }
     }
 }
@@ -838,10 +818,10 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokeElement(e
     )
 }
 
-private fun strokeColor(tool: CanvasTool, color: Color): Color = when (tool) {
-    CanvasTool.HIGHLIGHTER -> color.copy(alpha = 0.35f)
+private fun strokeColor(tool: CanvasTool, color: Color, opacity: Float = 1f): Color = when (tool) {
+    CanvasTool.HIGHLIGHTER -> color.copy(alpha = 0.35f * opacity)
     CanvasTool.ERASER -> Color.White
-    else -> color
+    else -> color.copy(alpha = opacity)
 }
 
 private fun strokeWidth(tool: CanvasTool, width: Float): Float = when (tool) {
@@ -851,57 +831,332 @@ private fun strokeWidth(tool: CanvasTool, width: Float): Float = when (tool) {
     else -> width
 }
 
+/* ====================== 华为风格顶部栏 ====================== */
+
+/** 顶栏配色（标题行/工具行/圆钮底/墨色/选中底/发丝线），区分深浅色模式。 */
+private data class HwBarColors(
+    val titleBg: Color,
+    val toolBg: Color,
+    val circleBg: Color,
+    val ink: Color,
+    val inkDisabled: Color,
+    val selBg: Color,
+    val hairline: Color,
+)
+
 @Composable
-private fun CanvasToolbar(
+private fun hwBarColors(): HwBarColors = if (isSystemInDarkTheme()) HwBarColors(
+    titleBg = Color(0xFF1E2022), toolBg = Color(0xFF26282B), circleBg = Color(0xFF35373B),
+    ink = Color(0xFFE6E8EA), inkDisabled = Color(0xFF5A5E62), selBg = Color(0xFF234A77), hairline = Color(0x22FFFFFF),
+) else HwBarColors(
+    titleBg = Color(0xFFF1F3F5), toolBg = Color(0xFFFCFCFE), circleBg = Color(0xFFE7E9EC),
+    ink = Color(0xFF1B1D1F), inkDisabled = Color(0xFFB9BDC1), selBg = Color(0xFFD6E6FF), hairline = Color(0x14000000),
+)
+
+/** 工具行线宽预设（对应华为三档波浪线）。 */
+private val widthPresets = listOf(3f, 6f, 12f)
+
+/** 工具行快捷色点。 */
+private val quickColors = listOf(Color(0xFF182431), Color(0xFFFA2A2D), Color(0xFFFFBB00))
+
+/** 无界笔记顶部栏：标题行 + 工具行（对照华为平板真机布局）。 */
+@Composable
+private fun HwCanvasTopBar(
+    title: String,
+    onTitleChange: (String) -> Unit,
+    onBack: () -> Unit,
     tool: CanvasTool,
     onTool: (CanvasTool) -> Unit,
+    canUndo: Boolean,
+    onUndo: () -> Unit,
+    canRedo: Boolean,
+    onRedo: () -> Unit,
+    palmBlock: Boolean,
+    onTogglePalm: () -> Unit,
+    background: String,
+    onBackground: (String) -> Unit,
+    width: Float,
+    onWidth: (Float) -> Unit,
     color: Color,
-    onOpenBrush: () -> Unit,
-    scalePercent: Int,
-    onZoomIn: () -> Unit,
-    onZoomOut: () -> Unit,
-    onReset: () -> Unit,
-    onImage: () -> Unit,
+    onColor: (Color) -> Unit,
+    minimapOn: Boolean,
+    onToggleMinimap: () -> Unit,
+    onInsertImage: () -> Unit,
+    onInsertSticker: () -> Unit,
     onInsertSpace: () -> Unit,
-    onSticker: () -> Unit,
+    onShareImage: () -> Unit,
+    onExportGallery: () -> Unit,
+    onExportPdf: () -> Unit,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp, shadowElevation = 4.dp) {
+    val c = hwBarColors()
+    Column(Modifier.background(c.titleBg).statusBarsPadding()) {
+        // —— 第一行：返回 + 笔记徽标 + 可编辑标题 + 右侧圆钮组 ——
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().height(54.dp).padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ToolButton(tool, CanvasTool.MOVE, Icons.Default.PanTool, onTool)
-            ToolButton(tool, CanvasTool.SELECT, Icons.Default.HighlightAlt, onTool)
-            ToolButton(tool, CanvasTool.LASSO, Icons.Default.Gesture, onTool)
-            ToolDivider()
-            ToolButton(tool, CanvasTool.PEN, Icons.Default.Edit, onTool)
-            ToolButton(tool, CanvasTool.PENCIL, Icons.Default.Create, onTool)
-            ToolButton(tool, CanvasTool.HIGHLIGHTER, Icons.Default.Brush, onTool)
-            ToolButton(tool, CanvasTool.SHAPE, Icons.Default.Category, onTool)
-            ToolButton(tool, CanvasTool.ERASER, Icons.Default.CleaningServices, onTool)
-            ToolButton(tool, CanvasTool.TEXT, Icons.Default.TextFields, onTool)
-            ToolDivider()
-            PlainTool(Icons.Default.Image, "图片", onImage)
-            PlainTool(Icons.Default.EmojiEmotions, "贴纸", onSticker)
-            PlainTool(Icons.Default.Height, "插入空白", onInsertSpace)
-            ToolDivider()
-            Box(
-                Modifier.size(28.dp).clip(CircleShape).background(color)
-                    .border(1.dp, Color(0x33000000), CircleShape)
-                    .androidx_clickable(onOpenBrush),
+            HwCircleButton(HwIcons.Back, "返回", c, onClick = onBack)
+            Spacer(Modifier.width(12.dp))
+            Icon(HwIcons.NoteBadge, null, tint = c.ink, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(8.dp))
+            BasicTextField(
+                value = title,
+                onValueChange = onTitleChange,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.titleMedium.copy(color = c.ink),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(Color(0xFF007DFF)),
+                decorationBox = { inner ->
+                    if (title.isEmpty()) Text("无界笔记", color = c.inkDisabled, style = MaterialTheme.typography.titleMedium)
+                    inner()
+                },
+                modifier = Modifier.weight(1f),
             )
-            Box(Modifier.width(6.dp))
-            IconButton(onClick = onZoomOut) { Icon(Icons.Default.Remove, "缩小") }
-            Text(
-                "$scalePercent%",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.clip(RoundedCornerShape(6.dp)).androidx_clickable(onReset).padding(horizontal = 4.dp, vertical = 4.dp),
-            )
-            IconButton(onClick = onZoomIn) { Icon(Icons.Default.Add, "放大") }
+            var insertOpen by remember { mutableStateOf(false) }
+            Box {
+                HwCircleButton(HwIcons.Add, "插入", c) { insertOpen = true }
+                DropdownMenu(insertOpen, { insertOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("图片") },
+                        leadingIcon = { Icon(HwIcons.Image, null, tint = c.ink, modifier = Modifier.size(20.dp)) },
+                        onClick = { insertOpen = false; onInsertImage() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("贴纸") },
+                        leadingIcon = { Icon(HwIcons.Sticker, null, tint = c.ink, modifier = Modifier.size(20.dp)) },
+                        onClick = { insertOpen = false; onInsertSticker() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("插入纵向空白") },
+                        leadingIcon = { Icon(HwIcons.InsertSpace, null, tint = c.ink, modifier = Modifier.size(20.dp)) },
+                        onClick = { insertOpen = false; onInsertSpace() },
+                    )
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            HwCircleButton(HwIcons.Panel, "缩略图", c, active = minimapOn, onClick = onToggleMinimap)
+            Spacer(Modifier.width(10.dp))
+            var moreOpen by remember { mutableStateOf(false) }
+            Box {
+                HwCircleButton(HwIcons.GridMenu, "更多", c) { moreOpen = true }
+                DropdownMenu(moreOpen, { moreOpen = false }) {
+                    DropdownMenuItem(text = { Text("分享为图片") }, onClick = { moreOpen = false; onShareImage() })
+                    DropdownMenuItem(text = { Text("导出图片到相册") }, onClick = { moreOpen = false; onExportGallery() })
+                    DropdownMenuItem(text = { Text("导出 PDF") }, onClick = { moreOpen = false; onExportPdf() })
+                }
+            }
+        }
+        // —— 第二行：撤销重做 ｜ 笔具 ｜ 功能 ｜ 线宽预设 + 快捷色 ——
+        Column(Modifier.background(c.toolBg)) {
+            Row(
+                Modifier.fillMaxWidth().height(46.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                HwToolIcon(HwIcons.Undo, "撤销", c, enabled = canUndo, onClick = onUndo)
+                HwToolIcon(HwIcons.Redo, "重做", c, enabled = canRedo, onClick = onRedo)
+                HwToolDivider(c)
+                HwToolButton(HwIcons.Move, CanvasTool.MOVE, tool, c, onTool)
+                HwToolButton(HwIcons.Pen, CanvasTool.PEN, tool, c, onTool)
+                HwToolButton(HwIcons.Pencil, CanvasTool.PENCIL, tool, c, onTool)
+                HwToolButton(HwIcons.Marker, CanvasTool.HIGHLIGHTER, tool, c, onTool)
+                HwToolButton(HwIcons.Eraser, CanvasTool.ERASER, tool, c, onTool)
+                HwToolButton(HwIcons.Lasso, CanvasTool.LASSO, tool, c, onTool)
+                HwToolButton(HwIcons.TextBox, CanvasTool.TEXT, tool, c, onTool)
+                HwToolDivider(c)
+                HwToolButton(HwIcons.ShapeRecog, CanvasTool.SHAPE, tool, c, onTool)
+                HwToolIcon(HwIcons.Palm, "防误触", c, active = palmBlock, onClick = onTogglePalm)
+                var paperOpen by remember { mutableStateOf(false) }
+                Box {
+                    HwToolIcon(HwIcons.Paper, "纸张样式", c) { paperOpen = true }
+                    DropdownMenu(paperOpen, { paperOpen = false }) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                            PaperOption("blank", "空白", background, c) { onBackground(it); paperOpen = false }
+                            PaperOption("grid", "网格", background, c) { onBackground(it); paperOpen = false }
+                            PaperOption("lines", "横线", background, c) { onBackground(it); paperOpen = false }
+                            PaperOption("dots", "点阵", background, c) { onBackground(it); paperOpen = false }
+                        }
+                    }
+                }
+                HwToolDivider(c)
+                widthPresets.forEach { w -> WavePreset(w, w == width, c) { onWidth(w) } }
+                Spacer(Modifier.width(6.dp))
+                quickColors.forEach { qc -> QuickColorDot(qc, qc == color, onColor) }
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(c.hairline))
         }
     }
 }
+
+/** 标题行圆形按钮（浅灰圆底 + 线性图标）。 */
+@Composable
+private fun HwCircleButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    desc: String,
+    c: HwBarColors,
+    active: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier
+            .size(38.dp)
+            .clip(CircleShape)
+            .background(if (active) c.selBg else c.circleBg)
+            .androidx_clickable(onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, desc, tint = c.ink, modifier = Modifier.size(20.dp))
+    }
+}
+
+/** 工具行按钮：选中时淡蓝圆底（华为式轻高亮）。 */
+@Composable
+private fun HwToolButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    t: CanvasTool,
+    current: CanvasTool,
+    c: HwBarColors,
+    onTool: (CanvasTool) -> Unit,
+) {
+    val selected = current == t
+    Box(
+        Modifier
+            .padding(horizontal = 2.dp)
+            .size(38.dp)
+            .clip(CircleShape)
+            .background(if (selected) c.selBg else Color.Transparent)
+            .androidx_clickable { onTool(t) },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, t.label, tint = c.ink, modifier = Modifier.size(22.dp))
+    }
+}
+
+/** 工具行功能图标（无工具态；可禁用/可激活高亮）。 */
+@Composable
+private fun HwToolIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    desc: String,
+    c: HwBarColors,
+    enabled: Boolean = true,
+    active: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier
+            .padding(horizontal = 2.dp)
+            .size(38.dp)
+            .clip(CircleShape)
+            .background(if (active) c.selBg else Color.Transparent)
+            .androidx_clickable { if (enabled) onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, desc, tint = if (enabled) c.ink else c.inkDisabled, modifier = Modifier.size(22.dp))
+    }
+}
+
+@Composable
+private fun HwToolDivider(c: HwBarColors) {
+    Box(Modifier.padding(horizontal = 7.dp).width(1.dp).height(20.dp).background(c.hairline))
+}
+
+/** 线宽预设：一段波浪线，粗细随档位变化（华为三档样式）。 */
+@Composable
+private fun WavePreset(w: Float, selected: Boolean, c: HwBarColors, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .padding(horizontal = 2.dp)
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(if (selected) c.selBg else Color.Transparent)
+            .androidx_clickable(onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.size(22.dp)) {
+            val p = Path().apply {
+                moveTo(size.width * 0.06f, size.height * 0.62f)
+                cubicTo(
+                    size.width * 0.28f, size.height * 0.24f,
+                    size.width * 0.46f, size.height * 0.28f,
+                    size.width * 0.56f, size.height * 0.54f,
+                )
+                cubicTo(
+                    size.width * 0.66f, size.height * 0.8f,
+                    size.width * 0.82f, size.height * 0.76f,
+                    size.width * 0.94f, size.height * 0.42f,
+                )
+            }
+            drawPath(p, color = c.ink, style = Stroke((1.2f + w * 0.32f).dp.toPx(), cap = StrokeCap.Round))
+        }
+    }
+}
+
+/** 快捷色点：当前色显示为粗圆环（华为样式），其余为实心圆点。 */
+@Composable
+private fun QuickColorDot(dotColor: Color, selected: Boolean, onColor: (Color) -> Unit) {
+    Box(
+        Modifier
+            .padding(horizontal = 2.dp)
+            .size(34.dp)
+            .clip(CircleShape)
+            .androidx_clickable { onColor(dotColor) },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.size(24.dp)) {
+            if (selected) {
+                drawCircle(dotColor, radius = 8.5.dp.toPx(), style = Stroke(4.5.dp.toPx()))
+            } else {
+                drawCircle(dotColor, radius = 7.dp.toPx())
+            }
+        }
+    }
+}
+
+/** 纸张样式选项（小预览块 + 标签）。 */
+@Composable
+private fun PaperOption(style: String, label: String, current: String, c: HwBarColors, onPick: (String) -> Unit) {
+    val selected = style == current
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(horizontal = 6.dp).androidx_clickable { onPick(style) },
+    ) {
+        Box(
+            Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.White)
+                .border(
+                    width = if (selected) 2.dp else 1.dp,
+                    color = if (selected) Color(0xFF007DFF) else Color(0x1F000000),
+                    shape = RoundedCornerShape(8.dp),
+                ),
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                val lc = Color(0x2E000000)
+                val sp = size.width / 4.5f
+                when (style) {
+                    "grid" -> {
+                        var x = sp; while (x < size.width) { drawLine(lc, Offset(x, 0f), Offset(x, size.height), 1f); x += sp }
+                        var y = sp; while (y < size.height) { drawLine(lc, Offset(0f, y), Offset(size.width, y), 1f); y += sp }
+                    }
+                    "lines" -> {
+                        var y = sp; while (y < size.height) { drawLine(lc, Offset(3f, y), Offset(size.width - 3f, y), 1f); y += sp }
+                    }
+                    "dots" -> {
+                        var y = sp
+                        while (y < size.height) {
+                            var x = sp
+                            while (x < size.width) { drawCircle(lc, 1.6f, Offset(x, y)); x += sp }
+                            y += sp
+                        }
+                    }
+                }
+            }
+        }
+        Text(label, fontSize = 11.sp, color = c.ink, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+/* ====================== 笔刷设置浮层（华为样式） ====================== */
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -912,70 +1167,122 @@ private fun BrushPanel(
     onColor: (Color) -> Unit,
     width: Float,
     onWidth: (Float) -> Unit,
+    opacity: Float,
+    onOpacity: (Float) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val c = hwBarColors()
     Surface(
-        modifier = modifier.width(300.dp),
-        color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(16.dp),
-        tonalElevation = 6.dp,
-        shadowElevation = 14.dp,
+        modifier = modifier.width(320.dp),
+        color = if (isSystemInDarkTheme()) Color(0xFF2A2C2E) else Color.White,
+        shape = RoundedCornerShape(18.dp),
+        shadowElevation = 16.dp,
         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x14000000)),
     ) {
-        Column(Modifier.padding(16.dp)) {
+        Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
+            // 标题（当前笔名）+ 关闭
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("笔刷", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                androidx.compose.material3.TextButton(onClick = onClose) { Text("完成") }
+                Text(tool.label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Icon(
+                    HwIcons.Close, "关闭", tint = c.ink,
+                    modifier = Modifier.size(30.dp).clip(CircleShape).androidx_clickable(onClose).padding(5.dp),
+                )
             }
-            Row(Modifier.padding(top = 4.dp)) {
-                ToolButton(tool, CanvasTool.PEN, Icons.Default.Edit, onTool)
-                ToolButton(tool, CanvasTool.PENCIL, Icons.Default.Create, onTool)
-                ToolButton(tool, CanvasTool.HIGHLIGHTER, Icons.Default.Brush, onTool)
+            // 笔尖预览行（三种笔具）
+            Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                BrushNib(HwIcons.Pen, CanvasTool.PEN, tool, c, onTool)
+                BrushNib(HwIcons.Pencil, CanvasTool.PENCIL, tool, c, onTool)
+                BrushNib(HwIcons.Marker, CanvasTool.HIGHLIGHTER, tool, c, onTool)
             }
-            Text("粗细", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
-            Row { widths.forEach { w -> WidthDot(w, w == width, onWidth) } }
-            Text("颜色", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
-            androidx.compose.foundation.layout.FlowRow(Modifier.padding(top = 4.dp)) {
-                gridColors.forEach { c -> ColorSwatch(c, c == color, onColor) }
+            // 粗细
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 10.dp)) {
+                Text("粗细", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.weight(1f))
+                Text("${width.roundToInt()}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            HwSlider(value = width, onValue = onWidth, range = 1f..30f)
+            // 不透明度
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+                Text("不透明度", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.weight(1f))
+                Text("${(opacity * 100).roundToInt()}%", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            HwSlider(value = opacity, onValue = onOpacity, range = 0.1f..1f)
+            // 颜色网格
+            Text("颜色", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+            androidx.compose.foundation.layout.FlowRow(Modifier.padding(top = 6.dp)) {
+                gridColors.forEach { gc -> ColorSwatch(gc, gc == color, onColor) }
             }
         }
     }
 }
 
+/** 华为风格细滑条：3.5dp 圆角轨道 + 小白圆钮（不依赖 M3 Slider 的版本差异）。 */
 @Composable
-private fun ToolButton(current: CanvasTool, t: CanvasTool, icon: androidx.compose.ui.graphics.vector.ImageVector, onTool: (CanvasTool) -> Unit) {
+private fun HwSlider(value: Float, onValue: (Float) -> Unit, range: ClosedFloatingPointRange<Float>) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(28.dp)
+            .pointerInput(range) {
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    val pad = 8.dp.toPx()
+                    fun set(x: Float) {
+                        val f = ((x - pad) / (size.width - pad * 2)).coerceIn(0f, 1f)
+                        onValue(range.start + f * (range.endInclusive - range.start))
+                    }
+                    set(down.position.x); down.consume()
+                    drag(down.id) { ch -> set(ch.position.x); ch.consume() }
+                }
+            },
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val pad = 8.dp.toPx()
+            val frac = ((value - range.start) / (range.endInclusive - range.start)).coerceIn(0f, 1f)
+            val cy = size.height / 2
+            val trackH = 3.5.dp.toPx()
+            val w = size.width - pad * 2
+            drawRoundRect(
+                Color(0x1F787880),
+                topLeft = Offset(pad, cy - trackH / 2),
+                size = androidx.compose.ui.geometry.Size(w, trackH),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(trackH / 2),
+            )
+            drawRoundRect(
+                Color(0xFF007DFF),
+                topLeft = Offset(pad, cy - trackH / 2),
+                size = androidx.compose.ui.geometry.Size(w * frac, trackH),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(trackH / 2),
+            )
+            val tx = pad + w * frac
+            drawCircle(Color.White, radius = 8.dp.toPx(), center = Offset(tx, cy))
+            drawCircle(Color(0x29000000), radius = 8.dp.toPx(), center = Offset(tx, cy), style = Stroke(1.dp.toPx()))
+        }
+    }
+}
+
+/** 笔刷面板中的笔尖选项卡。 */
+@Composable
+private fun BrushNib(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    t: CanvasTool,
+    current: CanvasTool,
+    c: HwBarColors,
+    onTool: (CanvasTool) -> Unit,
+) {
     val selected = current == t
     Box(
         Modifier
-            .padding(horizontal = 1.dp)
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent)
+            .size(width = 64.dp, height = 48.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) c.selBg else c.circleBg.copy(alpha = 0.5f))
             .androidx_clickable { onTool(t) },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            icon, t.label,
-            tint = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(22.dp),
-        )
+        Icon(icon, t.label, tint = c.ink, modifier = Modifier.size(28.dp))
     }
-}
-
-@Composable
-private fun PlainTool(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String, onClick: () -> Unit) {
-    Box(
-        Modifier.padding(horizontal = 1.dp).size(40.dp).clip(CircleShape).androidx_clickable(onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, desc, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
-    }
-}
-
-@Composable
-private fun ToolDivider() {
-    Box(Modifier.padding(horizontal = 5.dp).width(1.dp).height(22.dp).background(Color(0x1F000000)))
 }
 
 @Composable
@@ -993,21 +1300,6 @@ private fun ColorSwatch(c: Color, selected: Boolean, onColor: (Color) -> Unit) {
             )
             .androidx_clickable { onColor(c) },
     )
-}
-
-@Composable
-private fun WidthDot(w: Float, selected: Boolean, onWidth: (Float) -> Unit) {
-    Box(
-        Modifier
-            .padding(end = 4.dp)
-            .size(32.dp)
-            .clip(CircleShape)
-            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
-            .androidx_clickable { onWidth(w) },
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(Modifier.size((w / 2f + 3f).dp).background(MaterialTheme.colorScheme.onSurface, CircleShape))
-    }
 }
 
 private fun Modifier.androidx_clickable(onClick: () -> Unit): Modifier =

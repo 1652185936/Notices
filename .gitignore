@@ -12,3 +12,5 @@
 *.aab
 *.jks
 !gradle/wrapper/gradle-wrapper.jar
+
+/refs/

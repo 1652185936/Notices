@@ -1,14 +1,14 @@
 package com.yhx.notices.ui.navigation
 
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.EventNote
-import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -23,6 +23,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.yhx.notices.ui.canvas.CanvasScreen
 import com.yhx.notices.ui.editor.NoteEditorScreen
+import com.yhx.notices.ui.icons.HwIcons
 import com.yhx.notices.ui.notes.NotesListScreen
 import com.yhx.notices.ui.search.SearchScreen
 import com.yhx.notices.ui.settings.SettingsScreen
@@ -43,11 +44,13 @@ object Routes {
 
 private data class BottomTab(val route: String, val label: String, val icon: ImageVector)
 
-private val bottomTabs = listOf(
-    BottomTab(Routes.NOTES, "笔记", Icons.AutoMirrored.Outlined.EventNote),
-    BottomTab(Routes.TODO, "待办", Icons.Outlined.CheckCircle),
-    BottomTab(Routes.SETTINGS, "我的", Icons.Outlined.Person),
-)
+private val bottomTabs by lazy {
+    listOf(
+        BottomTab(Routes.NOTES, "笔记", HwIcons.NoteBadge),
+        BottomTab(Routes.TODO, "待办", HwIcons.TodoCheck),
+        BottomTab(Routes.SETTINGS, "我的", HwIcons.Person),
+    )
+}
 
 @Composable
 fun NoticesNavHost() {
@@ -58,7 +61,7 @@ fun NoticesNavHost() {
     Scaffold(
         bottomBar = {
             if (currentRoute in bottomTabs.map { it.route }) {
-                NavigationBar {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     bottomTabs.forEach { tab ->
                         NavigationBarItem(
                             selected = currentRoute == tab.route,
@@ -71,8 +74,15 @@ fun NoticesNavHost() {
                                     restoreState = true
                                 }
                             },
-                            icon = { Icon(tab.icon, contentDescription = tab.label) },
+                            icon = { Icon(tab.icon, contentDescription = tab.label, modifier = Modifier.size(22.dp)) },
                             label = { Text(tab.label) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = MaterialTheme.colorScheme.primary,
+                                selectedTextColor = MaterialTheme.colorScheme.primary,
+                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
                         )
                     }
                 }

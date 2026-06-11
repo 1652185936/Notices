@@ -38,9 +38,11 @@ class CanvasViewModel @Inject constructor(
     val elements: SnapshotStateList<CanvasElement> = mutableStateListOf()
 
     var canUndo by mutableStateOf(false); private set
+    var canRedo by mutableStateOf(false); private set
     var background by mutableStateOf("blank"); private set
 
     private val undoStack = ArrayDeque<List<CanvasElement>>()
+    private val redoStack = ArrayDeque<List<CanvasElement>>()
     private var dirty = false
     private var saveJob: Job? = null
 
@@ -57,9 +59,9 @@ class CanvasViewModel @Inject constructor(
         }
     }
 
-    fun cycleBackground() {
-        val order = listOf("blank", "grid", "lines", "dots")
-        background = order[(order.indexOf(background) + 1) % order.size]
+    /** 设置纸张样式（blank/grid/lines/dots）。 */
+    fun changeBackground(style: String) {
+        background = style
         markDirty()
     }
 
@@ -67,12 +69,25 @@ class CanvasViewModel @Inject constructor(
         undoStack.addLast(elements.toList())
         if (undoStack.size > 80) undoStack.removeFirst()
         canUndo = true
+        redoStack.clear()
+        canRedo = false
     }
 
     fun undo() {
         val prev = undoStack.removeLastOrNull() ?: return
+        redoStack.addLast(elements.toList())
+        canRedo = true
         elements.clear(); elements.addAll(prev)
         canUndo = undoStack.isNotEmpty()
+        markDirty()
+    }
+
+    fun redo() {
+        val next = redoStack.removeLastOrNull() ?: return
+        undoStack.addLast(elements.toList())
+        canUndo = true
+        elements.clear(); elements.addAll(next)
+        canRedo = redoStack.isNotEmpty()
         markDirty()
     }
 
