@@ -18,9 +18,11 @@ import com.yhx.notices.domain.canvas.ImageElement
 import com.yhx.notices.domain.canvas.StrokeElement
 import com.yhx.notices.domain.canvas.TextElement
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 @HiltViewModel
@@ -240,6 +242,68 @@ class CanvasViewModel @Inject constructor(
             pushUndo()
             elements.add(ImageElement(x = x, y = y, width = w, height = h, attachmentId = attachmentId))
             markDirty()
+        }
+    }
+
+    /** 多图导入：逐张导入并级联偏移排列，整批一次撤销。 */
+    fun insertImages(uris: List<Uri>, baseX: Float, baseY: Float) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            ensureSaved()
+            val added = ArrayList<ImageElement>(uris.size)
+            uris.forEachIndexed { i, uri ->
+                val attachmentId = attachmentRepo.importImage(noteId, uri)
+                val file = attachmentRepo.resolvePath(attachmentId)
+                val (w, h) = file?.let { imageSize(it.absolutePath) } ?: (600f to 400f)
+                added.add(
+                    ImageElement(
+                        x = baseX + i * 36f,
+                        y = baseY + i * 36f,
+                        width = w,
+                        height = h,
+                        attachmentId = attachmentId,
+                    )
+                )
+            }
+            if (added.isNotEmpty()) {
+                pushUndo()
+                elements.addAll(added)
+                markDirty()
+            }
+        }
+    }
+
+    /** PDF 导入：系统 PdfRenderer（无 GMS）逐页转图，纵向铺排，可在其上书写批注。整份一次撤销。 */
+    fun importPdf(uri: Uri, baseX: Float, baseY: Float) {
+        viewModelScope.launch {
+            ensureSaved()
+            val pageWidth = 760f
+            val added = ArrayList<ImageElement>()
+            withContext(Dispatchers.IO) {
+                val bitmaps = attachmentRepo.renderPdfToBitmaps(uri)
+                var y = baseY
+                for (bmp in bitmaps) {
+                    val attachmentId = attachmentRepo.importBitmap(noteId, bmp)
+                    val ratio = bmp.height.toFloat() / bmp.width.coerceAtLeast(1)
+                    val h = pageWidth * ratio
+                    added.add(
+                        ImageElement(
+                            x = baseX,
+                            y = y,
+                            width = pageWidth,
+                            height = h,
+                            attachmentId = attachmentId,
+                        )
+                    )
+                    y += h + 24f
+                    bmp.recycle()
+                }
+            }
+            if (added.isNotEmpty()) {
+                pushUndo()
+                elements.addAll(added)
+                markDirty()
+            }
         }
     }
 

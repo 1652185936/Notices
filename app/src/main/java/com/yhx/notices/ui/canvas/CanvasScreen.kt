@@ -589,12 +589,21 @@ fun CanvasScreen(
     }
 
     val imagePicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia()
+        ActivityResultContracts.PickMultipleVisualMedia(9)
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            // 插入到当前视口中心对应的世界坐标，级联偏移排列
+            val world = screenToWorld(Offset(canvasSize.width / 2f, canvasSize.height / 2f))
+            viewModel.insertImages(uris, world.x, world.y)
+        }
+    }
+
+    val pdfPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let {
-            // 插入到当前视口中心对应的世界坐标
-            val world = screenToWorld(Offset(600f, 800f))
-            viewModel.insertImage(it, world.x, world.y)
+            val tl = screenToWorld(Offset(canvasSize.width / 2f, 120f))
+            viewModel.importPdf(it, tl.x, tl.y)
         }
     }
 
@@ -619,6 +628,9 @@ fun CanvasScreen(
                 onToggleMinimap = { minimapOn = !minimapOn },
                 onInsertImage = {
                     imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                },
+                onInsertPdf = {
+                    pdfPicker.launch(arrayOf("application/pdf"))
                 },
                 onInsertSticker = { showStickers = true },
                 onInsertSpace = {
@@ -1441,6 +1453,7 @@ private fun HwCanvasTopBar(
     minimapOn: Boolean,
     onToggleMinimap: () -> Unit,
     onInsertImage: () -> Unit,
+    onInsertPdf: () -> Unit,
     onInsertSticker: () -> Unit,
     onInsertSpace: () -> Unit,
     onShareImage: () -> Unit,
@@ -1478,6 +1491,11 @@ private fun HwCanvasTopBar(
                         text = { Text("图片") },
                         leadingIcon = { Icon(HwIcons.Image, null, tint = c.ink, modifier = Modifier.size(20.dp)) },
                         onClick = { insertOpen = false; onInsertImage() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("PDF") },
+                        leadingIcon = { Icon(HwIcons.NoteBadge, null, tint = c.ink, modifier = Modifier.size(20.dp)) },
+                        onClick = { insertOpen = false; onInsertPdf() },
                     )
                     DropdownMenuItem(
                         text = { Text("贴纸") },
