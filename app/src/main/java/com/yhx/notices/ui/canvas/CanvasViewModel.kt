@@ -84,6 +84,12 @@ class CanvasViewModel @Inject constructor(
         markDirty()
     }
 
+    fun addSticker(emoji: String, x: Float, y: Float) {
+        pushUndo()
+        elements.add(TextElement(x = x, y = y, text = emoji, fontSize = 96f))
+        markDirty()
+    }
+
     fun addText(x: Float, y: Float): String {
         pushUndo()
         val t = TextElement(x = x, y = y, text = "")

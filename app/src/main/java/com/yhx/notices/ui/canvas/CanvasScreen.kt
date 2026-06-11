@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
@@ -132,6 +133,34 @@ private fun selectionBounds(elements: List<com.yhx.notices.domain.canvas.CanvasE
         }
     }
     return if (minX == Float.MAX_VALUE) null else floatArrayOf(minX, minY, maxX, maxY)
+}
+
+private val stickerEmojis = listOf(
+    "😀", "😄", "😍", "🤔", "😎", "😭", "👍", "👏", "🙏", "💪",
+    "❤️", "🔥", "⭐", "✨", "🎉", "✅", "❌", "❗", "❓", "💡",
+    "📌", "📎", "🔖", "📝", "📅", "⏰", "🎯", "🚀", "🌟", "☀️",
+    "🌈", "🍀", "🎵", "💯", "👀", "🤝", "🥳", "😴", "🤩", "🙌",
+)
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun StickerPicker(onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("贴纸") },
+        text = {
+            androidx.compose.foundation.layout.FlowRow {
+                stickerEmojis.forEach { e ->
+                    Text(
+                        e,
+                        fontSize = 28.sp,
+                        modifier = Modifier.androidx_clickable { onPick(e) }.padding(8.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
 }
 
 /** 任意元素的世界包围盒 [minX,minY,maxX,maxY]（含笔迹）。 */
@@ -310,6 +339,7 @@ fun CanvasScreen(
     var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var lassoMoving by remember { mutableStateOf(false) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+    var showStickers by remember { mutableStateOf(false) }
 
     val livePoints = remember { mutableStateListOf<Offset>() }
     val bitmaps = remember { mutableStateMapOf<Long, ImageBitmap?>() }
@@ -430,6 +460,7 @@ fun CanvasScreen(
                     val cy = screenToWorld(Offset(canvasSize.width / 2f, canvasSize.height / 2f)).y
                     viewModel.insertVerticalSpace(cy, 400f)
                 },
+                onSticker = { showStickers = true },
             )
         },
     ) { padding ->
@@ -650,6 +681,17 @@ fun CanvasScreen(
                 )
             }
 
+            if (showStickers) {
+                StickerPicker(
+                    onPick = { emoji ->
+                        val c = screenToWorld(Offset(canvasSize.width / 2f, canvasSize.height / 2f))
+                        viewModel.addSticker(emoji, c.x, c.y)
+                        showStickers = false
+                    },
+                    onDismiss = { showStickers = false },
+                )
+            }
+
             // 正在编辑的文字框（覆盖在画布上，按世界→屏幕定位）
             editingId?.let { id ->
                 val el = viewModel.elements.firstOrNull { it.id == id } as? TextElement
@@ -752,6 +794,7 @@ private fun CanvasToolbar(
     onReset: () -> Unit,
     onImage: () -> Unit,
     onInsertSpace: () -> Unit,
+    onSticker: () -> Unit,
 ) {
     Surface(tonalElevation = 3.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
@@ -768,6 +811,7 @@ private fun CanvasToolbar(
                 }
                 IconButton(onClick = onImage) { Icon(Icons.Default.Image, "插入图片") }
                 IconButton(onClick = onInsertSpace) { Icon(Icons.Default.Height, "插入空白") }
+                IconButton(onClick = onSticker) { Icon(Icons.Default.EmojiEmotions, "贴纸") }
             }
             Row(
                 Modifier.fillMaxWidth().padding(top = 6.dp),
