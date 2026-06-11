@@ -204,6 +204,7 @@ fun CanvasScreen(
                 scalePercent = (scale * 100).roundToInt(),
                 onZoomIn = { scale = (scale * 1.25f).coerceAtMost(10f) },
                 onZoomOut = { scale = (scale / 1.25f).coerceAtLeast(0.1f) },
+                onReset = { scale = 1f; offset = Offset.Zero },
                 onImage = {
                     imagePicker.launch(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
@@ -246,14 +247,18 @@ fun CanvasScreen(
                                 if (livePoints.size >= 1) {
                                     val flat = ArrayList<Float>(livePoints.size * 2)
                                     livePoints.forEach { flat.add(it.x); flat.add(it.y) }
-                                    viewModel.addStroke(
-                                        StrokeElement(
-                                            tool = tool.name.lowercase(),
-                                            color = strokeColor(tool, color).toArgb(),
-                                            width = strokeWidth(tool, width),
-                                            points = flat,
+                                    if (tool == CanvasTool.ERASER) {
+                                        viewModel.eraseStrokes(flat, 20f / scale)
+                                    } else {
+                                        viewModel.addStroke(
+                                            StrokeElement(
+                                                tool = tool.name.lowercase(),
+                                                color = strokeColor(tool, color).toArgb(),
+                                                width = strokeWidth(tool, width),
+                                                points = flat,
+                                            )
                                         )
-                                    )
+                                    }
                                 }
                                 livePoints.clear()
                             },
@@ -404,6 +409,7 @@ private fun CanvasToolbar(
     scalePercent: Int,
     onZoomIn: () -> Unit,
     onZoomOut: () -> Unit,
+    onReset: () -> Unit,
     onImage: () -> Unit,
 ) {
     Surface(tonalElevation = 3.dp) {
@@ -451,7 +457,11 @@ private fun CanvasToolbar(
                 }
                 Box(Modifier.weight(1f))
                 IconButton(onClick = onZoomOut) { Icon(Icons.Default.Remove, "缩小") }
-                Text("$scalePercent%", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "$scalePercent%",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.androidx_clickable(onReset).padding(horizontal = 4.dp),
+                )
                 IconButton(onClick = onZoomIn) { Icon(Icons.Default.Add, "放大") }
             }
         }

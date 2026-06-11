@@ -111,6 +111,32 @@ class CanvasViewModel @Inject constructor(
         markDirty()
     }
 
+    /** 橡皮：移除与擦除路径相交的笔迹。 */
+    fun eraseStrokes(erasePoints: List<Float>, radius: Float) {
+        if (erasePoints.size < 2) return
+        val r2 = radius * radius
+        val toRemove = elements.filterIsInstance<StrokeElement>().filter { s ->
+            var hit = false
+            var i = 0
+            while (i + 1 < s.points.size && !hit) {
+                var j = 0
+                while (j + 1 < erasePoints.size) {
+                    val dx = s.points[i] - erasePoints[j]
+                    val dy = s.points[i + 1] - erasePoints[j + 1]
+                    if (dx * dx + dy * dy <= r2) { hit = true; break }
+                    j += 2
+                }
+                i += 2
+            }
+            hit
+        }
+        if (toRemove.isNotEmpty()) {
+            pushUndo()
+            elements.removeAll(toRemove.toSet())
+            markDirty()
+        }
+    }
+
     fun deleteElement(id: String) {
         pushUndo()
         elements.removeAll { it.id == id }
