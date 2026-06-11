@@ -97,6 +97,19 @@ fun NoteEditorScreen(
     ) { granted -> if (granted) viewModel.startRecording() }
 
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    var cameraUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        if (ok) cameraUri?.let { viewModel.insertImage(it) }
+    }
+    fun launchCamera() {
+        val uri = createCameraUri(context)
+        cameraUri = uri
+        takePicture.launch(uri)
+    }
+    val cameraPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> if (granted) launchCamera() }
     var showSketch by remember { mutableStateOf(false) }
     var viewerPath by remember { mutableStateOf<String?>(null) }
     var showTagDialog by remember { mutableStateOf(false) }
@@ -223,6 +236,13 @@ fun NoteEditorScreen(
                         imagePicker.launch(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                         )
+                    },
+                    onCamera = {
+                        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                                context, android.Manifest.permission.CAMERA
+                            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        ) launchCamera()
+                        else cameraPermission.launch(android.Manifest.permission.CAMERA)
                     },
                     onChecklist = viewModel::toggleChecklistKind,
                     onSketch = { showSketch = true },
@@ -764,6 +784,12 @@ private fun listPrefix(block: TextBlock, vm: NoteEditorViewModel): String? = whe
     TextKind.NUMBERED -> "${numberedIndex(block, vm)}.  "
     TextKind.QUOTE -> "丨  "
     else -> null
+}
+
+private fun createCameraUri(context: android.content.Context): android.net.Uri {
+    val dir = java.io.File(context.cacheDir, "camera").apply { mkdirs() }
+    val file = java.io.File(dir, "cam_${System.currentTimeMillis()}.jpg")
+    return androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
 }
 
 internal fun shareUri(context: android.content.Context, uri: android.net.Uri, mime: String) {

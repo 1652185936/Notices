@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardVoice
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Title
 import androidx.compose.material3.Icon
@@ -104,6 +105,7 @@ private fun ColorDot(color: Color, ring: Boolean = false, onClick: () -> Unit) {
 @Composable
 fun InsertBar(
     onImage: () -> Unit,
+    onCamera: () -> Unit,
     onChecklist: () -> Unit,
     onSketch: () -> Unit,
     onAudio: () -> Unit,
@@ -120,6 +122,9 @@ fun InsertBar(
         ) {
             IconButton(onClick = onImage) {
                 Icon(Icons.Default.Image, contentDescription = "插入图片")
+            }
+            IconButton(onClick = onCamera) {
+                Icon(Icons.Default.PhotoCamera, contentDescription = "拍照")
             }
             IconButton(onClick = onChecklist) {
                 Icon(Icons.Default.CheckCircle, contentDescription = "插入清单")

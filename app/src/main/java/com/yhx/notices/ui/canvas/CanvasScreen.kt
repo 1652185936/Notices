@@ -134,6 +134,76 @@ private fun selectionBounds(elements: List<com.yhx.notices.domain.canvas.CanvasE
     return if (minX == Float.MAX_VALUE) null else floatArrayOf(minX, minY, maxX, maxY)
 }
 
+/** 任意元素的世界包围盒 [minX,minY,maxX,maxY]（含笔迹）。 */
+private fun elementBox(el: com.yhx.notices.domain.canvas.CanvasElement): FloatArray? = when (el) {
+    is StrokeElement -> {
+        if (el.points.size < 2) null else {
+            var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+            var i = 0
+            while (i + 1 < el.points.size) {
+                minX = minOf(minX, el.points[i]); maxX = maxOf(maxX, el.points[i])
+                minY = minOf(minY, el.points[i + 1]); maxY = maxOf(maxY, el.points[i + 1]); i += 2
+            }
+            floatArrayOf(minX, minY, maxX, maxY)
+        }
+    }
+    is TextElement -> floatArrayOf(el.x, el.y, el.x + 60, el.y + el.fontSize)
+    is ImageElement -> floatArrayOf(el.x, el.y, el.x + el.width, el.y + el.height)
+    else -> null
+}
+
+@Composable
+private fun Minimap(
+    elements: List<com.yhx.notices.domain.canvas.CanvasElement>,
+    viewport: FloatArray,
+    onJump: (Float, Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var minX = viewport[0]; var minY = viewport[1]; var maxX = viewport[2]; var maxY = viewport[3]
+    elements.forEach { el ->
+        elementBox(el)?.let { b ->
+            minX = minOf(minX, b[0]); minY = minOf(minY, b[1]); maxX = maxOf(maxX, b[2]); maxY = maxOf(maxY, b[3])
+        }
+    }
+    val pad = (maxOf(maxX - minX, maxY - minY)) * 0.05f + 20f
+    minX -= pad; minY -= pad; maxX += pad; maxY += pad
+    val bw = (maxX - minX).coerceAtLeast(1f); val bh = (maxY - minY).coerceAtLeast(1f)
+
+    androidx.compose.material3.Surface(
+        modifier = modifier.size(110.dp, 150.dp),
+        color = Color(0xF2FFFFFF),
+        shape = RoundedCornerShape(8.dp),
+        tonalElevation = 4.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x33000000)),
+    ) {
+        Canvas(
+            Modifier.fillMaxSize().padding(4.dp).pointerInput(bw, bh) {
+                detectTapGestures { p ->
+                    val s = minOf(size.width / bw, size.height / bh)
+                    onJump(minX + p.x / s, minY + p.y / s)
+                }
+            }
+        ) {
+            val s = minOf(size.width / bw, size.height / bh)
+            elements.forEach { el ->
+                elementBox(el)?.let { b ->
+                    drawRect(
+                        Color(0x66007DFF),
+                        topLeft = Offset((b[0] - minX) * s, (b[1] - minY) * s),
+                        size = androidx.compose.ui.geometry.Size(((b[2] - b[0]) * s).coerceAtLeast(2f), ((b[3] - b[1]) * s).coerceAtLeast(2f)),
+                    )
+                }
+            }
+            drawRect(
+                Color(0xFFFA2A2D),
+                topLeft = Offset((viewport[0] - minX) * s, (viewport[1] - minY) * s),
+                size = androidx.compose.ui.geometry.Size((viewport[2] - viewport[0]) * s, (viewport[3] - viewport[1]) * s),
+                style = Stroke(2f),
+            )
+        }
+    }
+}
+
 /** 返回元素包围盒 [x, y, w, h]，笔迹不可选返回 null。 */
 private fun elementBounds(el: com.yhx.notices.domain.canvas.CanvasElement): FloatArray? = when (el) {
     is ImageElement -> floatArrayOf(el.x, el.y, el.width, el.height)
@@ -564,6 +634,20 @@ fun CanvasScreen(
                     modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
                     containerColor = MaterialTheme.colorScheme.errorContainer,
                 ) { Icon(Icons.Default.Delete, "删除选中 (${selectedIds.size})") }
+            }
+
+            // 缩略图导航（小地图）
+            if (viewModel.elements.isNotEmpty() && canvasSize.width > 0) {
+                val tl = screenToWorld(Offset.Zero)
+                val br = screenToWorld(Offset(canvasSize.width.toFloat(), canvasSize.height.toFloat()))
+                Minimap(
+                    elements = viewModel.elements.toList(),
+                    viewport = floatArrayOf(tl.x, tl.y, br.x, br.y),
+                    onJump = { wx, wy ->
+                        offset = Offset(canvasSize.width / 2f - wx * scale, canvasSize.height / 2f - wy * scale)
+                    },
+                    modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
+                )
             }
 
             // 正在编辑的文字框（覆盖在画布上，按世界→屏幕定位）
