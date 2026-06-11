@@ -176,6 +176,26 @@ private fun StickerPicker(onPick: (String) -> Unit, onDismiss: () -> Unit) {
     )
 }
 
+@Composable
+private fun LassoMenu(count: Int, onCopy: () -> Unit, onDelete: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(10.dp),
+        tonalElevation = 4.dp,
+        shadowElevation = 10.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x14000000)),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 2.dp)) {
+            androidx.compose.material3.TextButton(onClick = onCopy) { Text("复制") }
+            Box(Modifier.width(1.dp).height(20.dp).background(Color(0x1F000000)))
+            androidx.compose.material3.TextButton(onClick = onDelete) {
+                Text("删除", color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+}
+
 /** 任意元素的世界包围盒 [minX,minY,maxX,maxY]（含笔迹）。 */
 private fun elementBox(el: com.yhx.notices.domain.canvas.CanvasElement): FloatArray? = when (el) {
     is StrokeElement -> {
@@ -686,11 +706,22 @@ fun CanvasScreen(
                 ) { Icon(Icons.Default.Delete, "删除选中") }
             }
             if (selectedIds.isNotEmpty() && tool == CanvasTool.LASSO) {
-                androidx.compose.material3.FloatingActionButton(
-                    onClick = { viewModel.deleteElements(selectedIds); selectedIds = emptySet() },
-                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                ) { Icon(Icons.Default.Delete, "删除选中 (${selectedIds.size})") }
+                val sb = selectionBounds(viewModel.elements, selectedIds)
+                if (sb != null) {
+                    val midX = (sb[0] + sb[2]) / 2 * scale + offset.x
+                    val topY = sb[1] * scale + offset.y
+                    LassoMenu(
+                        count = selectedIds.size,
+                        onCopy = { selectedIds = viewModel.duplicateElements(selectedIds) },
+                        onDelete = { viewModel.deleteElements(selectedIds); selectedIds = emptySet() },
+                        modifier = Modifier.offset {
+                            IntOffset(
+                                (midX - 130).roundToInt().coerceAtLeast(8),
+                                (topY - 64f).coerceAtLeast(8f).roundToInt(),
+                            )
+                        },
+                    )
+                }
             }
 
             // 缩略图导航（小地图）

@@ -189,6 +189,23 @@ class CanvasViewModel @Inject constructor(
         markDirty()
     }
 
+    /** 复制选中元素（偏移 +40），返回副本 id 集合。 */
+    fun duplicateElements(ids: Set<String>): Set<String> {
+        if (ids.isEmpty()) return emptySet()
+        pushUndo()
+        val copies = elements.filter { it.id in ids }.map { el ->
+            when (el) {
+                is StrokeElement -> el.copy(id = com.yhx.notices.domain.canvas.newId(), points = el.points.map { it + 40f })
+                is TextElement -> el.copy(id = com.yhx.notices.domain.canvas.newId(), x = el.x + 40f, y = el.y + 40f)
+                is ImageElement -> el.copy(id = com.yhx.notices.domain.canvas.newId(), x = el.x + 40f, y = el.y + 40f)
+                else -> el
+            }
+        }
+        elements.addAll(copies)
+        markDirty()
+        return copies.map { it.id }.toSet()
+    }
+
     fun deleteElement(id: String) {
         pushUndo()
         elements.removeAll { it.id == id }
