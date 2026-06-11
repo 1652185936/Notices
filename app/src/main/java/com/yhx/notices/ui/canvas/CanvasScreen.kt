@@ -5,9 +5,13 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -26,12 +30,21 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.HighlightAlt
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -796,61 +809,116 @@ private fun CanvasToolbar(
     onInsertSpace: () -> Unit,
     onSticker: () -> Unit,
 ) {
-    Surface(tonalElevation = 3.dp) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 3.dp,
+        shadowElevation = 8.dp,
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp)) {
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                CanvasTool.entries.forEach { t ->
-                    FilterChip(
-                        selected = tool == t,
-                        onClick = { onTool(t) },
-                        label = { Text(t.label) },
-                        modifier = Modifier.padding(end = 6.dp),
-                    )
-                }
-                IconButton(onClick = onImage) { Icon(Icons.Default.Image, "插入图片") }
-                IconButton(onClick = onInsertSpace) { Icon(Icons.Default.Height, "插入空白") }
-                IconButton(onClick = onSticker) { Icon(Icons.Default.EmojiEmotions, "贴纸") }
+                ToolButton(tool, CanvasTool.MOVE, Icons.Default.PanTool, onTool)
+                ToolButton(tool, CanvasTool.SELECT, Icons.Default.HighlightAlt, onTool)
+                ToolButton(tool, CanvasTool.LASSO, Icons.Default.Gesture, onTool)
+                ToolDivider()
+                ToolButton(tool, CanvasTool.PEN, Icons.Default.Edit, onTool)
+                ToolButton(tool, CanvasTool.PENCIL, Icons.Default.Create, onTool)
+                ToolButton(tool, CanvasTool.HIGHLIGHTER, Icons.Default.Brush, onTool)
+                ToolButton(tool, CanvasTool.SHAPE, Icons.Default.Category, onTool)
+                ToolButton(tool, CanvasTool.ERASER, Icons.Default.CleaningServices, onTool)
+                ToolButton(tool, CanvasTool.TEXT, Icons.Default.TextFields, onTool)
+                ToolDivider()
+                PlainTool(Icons.Default.Image, "图片", onImage)
+                PlainTool(Icons.Default.EmojiEmotions, "贴纸", onSticker)
+                PlainTool(Icons.Default.Height, "插入空白", onInsertSpace)
             }
             Row(
                 Modifier.fillMaxWidth().padding(top = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                palette.forEach { c ->
-                    Box(
-                        Modifier
-                            .padding(end = 6.dp)
-                            .size(if (c == color) 28.dp else 24.dp)
-                            .background(c, CircleShape)
-                            .androidx_clickable { onColor(c) }
-                    )
-                }
-                Box(Modifier.size(8.dp))
-                widths.forEach { w ->
-                    Box(
-                        Modifier
-                            .padding(end = 4.dp)
-                            .size(30.dp)
-                            .background(
-                                if (w == width) Color(0x22007DFF) else Color.Transparent, CircleShape
-                            )
-                            .androidx_clickable { onWidth(w) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Box(Modifier.size((w / 2f + 4f).dp).background(Color(0xFF182431), CircleShape))
-                    }
-                }
+                palette.forEach { c -> ColorSwatch(c, c == color, onColor) }
+                Box(Modifier.width(10.dp))
+                widths.forEach { w -> WidthDot(w, w == width, onWidth) }
                 Box(Modifier.weight(1f))
                 IconButton(onClick = onZoomOut) { Icon(Icons.Default.Remove, "缩小") }
                 Text(
                     "$scalePercent%",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.androidx_clickable(onReset).padding(horizontal = 4.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).androidx_clickable(onReset).padding(horizontal = 6.dp, vertical = 4.dp),
                 )
                 IconButton(onClick = onZoomIn) { Icon(Icons.Default.Add, "放大") }
             }
         }
+    }
+}
+
+@Composable
+private fun ToolButton(current: CanvasTool, t: CanvasTool, icon: androidx.compose.ui.graphics.vector.ImageVector, onTool: (CanvasTool) -> Unit) {
+    val selected = current == t
+    Box(
+        Modifier
+            .padding(horizontal = 1.dp)
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent)
+            .androidx_clickable { onTool(t) },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon, t.label,
+            tint = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(22.dp),
+        )
+    }
+}
+
+@Composable
+private fun PlainTool(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String, onClick: () -> Unit) {
+    Box(
+        Modifier.padding(horizontal = 1.dp).size(40.dp).clip(CircleShape).androidx_clickable(onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, desc, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
+    }
+}
+
+@Composable
+private fun ToolDivider() {
+    Box(Modifier.padding(horizontal = 5.dp).width(1.dp).height(22.dp).background(Color(0x1F000000)))
+}
+
+@Composable
+private fun ColorSwatch(c: Color, selected: Boolean, onColor: (Color) -> Unit) {
+    Box(
+        Modifier
+            .padding(end = 7.dp)
+            .size(if (selected) 28.dp else 24.dp)
+            .clip(CircleShape)
+            .background(c)
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = if (selected) MaterialTheme.colorScheme.primary else Color(0x22000000),
+                shape = CircleShape,
+            )
+            .androidx_clickable { onColor(c) },
+    )
+}
+
+@Composable
+private fun WidthDot(w: Float, selected: Boolean, onWidth: (Float) -> Unit) {
+    Box(
+        Modifier
+            .padding(end = 4.dp)
+            .size(32.dp)
+            .clip(CircleShape)
+            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+            .androidx_clickable { onWidth(w) },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.size((w / 2f + 3f).dp).background(MaterialTheme.colorScheme.onSurface, CircleShape))
     }
 }
 
