@@ -155,12 +155,30 @@ class ExportManager @Inject constructor(
                         el.points, radii, roundCaps = el.tool != "highlighter",
                     )
                     if (outline.size >= 6) {
-                        val paint = Paint().apply { color = el.color; isAntiAlias = true; style = Paint.Style.FILL }
                         val path = android.graphics.Path()
                         path.moveTo(outline[0], outline[1])
                         var i = 2; while (i + 1 < outline.size) { path.lineTo(outline[i], outline[i + 1]); i += 2 }
                         path.close()
-                        canvas.drawPath(path, paint)
+                        if (el.tool == "highlighter") {
+                            // 与屏幕端一致：Multiply 真叠色 + 两侧略深沉积边
+                            val a = Color.alpha(el.color)
+                            val fill = Paint().apply {
+                                color = el.color; isAntiAlias = true; style = Paint.Style.FILL
+                                xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.MULTIPLY)
+                            }
+                            canvas.drawPath(path, fill)
+                            val edgeA = (a + 31).coerceAtMost(255) // +0.12 alpha
+                            val edge = Paint().apply {
+                                color = (el.color and 0x00FFFFFF) or (edgeA shl 24)
+                                isAntiAlias = true; style = Paint.Style.STROKE
+                                strokeWidth = (el.width * 0.08f).coerceIn(0.6f, 2.2f)
+                                xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.MULTIPLY)
+                            }
+                            canvas.drawPath(path, edge)
+                        } else {
+                            val paint = Paint().apply { color = el.color; isAntiAlias = true; style = Paint.Style.FILL }
+                            canvas.drawPath(path, paint)
+                        }
                     }
                 }
                 is ImageElement -> {

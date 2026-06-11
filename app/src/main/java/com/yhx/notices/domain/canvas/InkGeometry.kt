@@ -123,6 +123,25 @@ object InkGeometry {
         return out.toFloatArray()
     }
 
+    /**
+     * 斜口荧光笔笔宽：荧光笔笔尖是固定约 -45°(135°) 的斜方头。
+     * 运笔方向与笔尖平行时细、垂直时宽 → 横划成宽带、竖划成细线。
+     *
+     * @param baseW 满宽（运笔垂直于笔尖时的宽度）
+     * @param dirAngle 当前运笔方向角（弧度，atan2(dy,dx)）
+     * @param nibAngle 笔尖朝向角（弧度，默认 135° = 3π/4，即 -45° 斜方头）
+     * @param chiselMin 平行运笔时的最小宽度比例（0..1）
+     */
+    fun chiselWidth(
+        baseW: Float,
+        dirAngle: Float,
+        nibAngle: Float = (3.0 * PI / 4.0).toFloat(),
+        chiselMin: Float = 0.35f,
+    ): Float {
+        val factor = chiselMin + (1f - chiselMin) * kotlin.math.abs(sin(dirAngle - nibAngle))
+        return baseW * factor
+    }
+
     /** 收笔笔锋：把最后几个半径按比例递减，模拟提笔。 */
     fun taperTail(radii: MutableList<Float>, tailCount: Int = 3) {
         if (radii.size < tailCount + 2) return

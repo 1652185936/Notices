@@ -1011,7 +1011,9 @@ fun CanvasScreen(
                             val baseW = strokeWidth(tool, width)
                             var lastPos = down.position
                             var lastTime = down.uptimeMillis
-                            var penW = baseW * 0.65f // 起笔渐入
+                            // 荧光笔斜口起笔按平行方向最细宽起步，其余笔起笔渐入
+                            var penW = if (tool == CanvasTool.HIGHLIGHTER) baseW * 0.5f else baseW * 0.65f
+                            var lastDir = 0f // 荧光笔上一段运笔方向角（首点无方向时沿用）
                             var multiTouch = false
                             // 一笔成形「停顿确认」：跟踪最近一次明显移动的时间；末端原地停顿 ≥350ms 才规整
                             var lastMoveTime = down.uptimeMillis
@@ -1059,12 +1061,21 @@ fun CanvasScreen(
                                 if (fingerPansOnly) {
                                     offset += ch.positionChange()
                                 } else {
-                                    val dist = (ch.position - lastPos).getDistance()
+                                    val delta = ch.position - lastPos
+                                    val dist = delta.getDistance()
                                     val dt = (ch.uptimeMillis - lastTime).coerceAtLeast(1L)
-                                    val target = baseW * widthFactor(tool, dist / dt, ch.pressure, ch.type)
-                                    penW += (target - penW) * 0.35f // 指数平滑防突变
-                                    lastPos = ch.position; lastTime = ch.uptimeMillis
                                     val w = screenToWorld(ch.position)
+                                    if (tool == CanvasTool.HIGHLIGHTER) {
+                                        // 斜口荧光笔：笔宽随运笔方向变化（横宽竖细），不做提按/起收锋
+                                        val dirAngle = if (dist > 0.5f) atan2(delta.y, delta.x) else lastDir
+                                        lastDir = dirAngle
+                                        val target = InkGeometry.chiselWidth(baseW, dirAngle)
+                                        penW += (target - penW) * 0.5f
+                                    } else {
+                                        val target = baseW * widthFactor(tool, dist / dt, ch.pressure, ch.type)
+                                        penW += (target - penW) * 0.35f // 指数平滑防突变
+                                    }
+                                    lastPos = ch.position; lastTime = ch.uptimeMillis
                                     livePoints.add(w); liveWidths.add(penW)
                                     if (tool == CanvasTool.SHAPE) {
                                         // 末端原地停顿检测：位移超阈值则重置停顿锚点，否则累计停留时长
@@ -1121,10 +1132,12 @@ fun CanvasScreen(
                                         )
                                     )
                                     else -> {
-                                        // 马克笔/荧光笔为恒宽方杆笔，不存逐点宽；书写类笔收笔出锋
-                                        val constantWidth = tool == CanvasTool.HIGHLIGHTER || tool == CanvasTool.MARKER
+                                        // 马克笔为恒宽方杆笔，不存逐点宽；荧光笔为斜口笔存逐点宽但平头不出锋；
+                                        // 其余书写类笔收笔出锋
+                                        val constantWidth = tool == CanvasTool.MARKER
                                         val ws = ArrayList(liveWidths)
-                                        if (!constantWidth) InkGeometry.taperTail(ws)
+                                        // 荧光笔保持平头方头，不 taperTail；其余书写类出锋
+                                        if (!constantWidth && tool != CanvasTool.HIGHLIGHTER) InkGeometry.taperTail(ws)
                                         viewModel.addStroke(
                                             StrokeElement(
                                                 tool = tool.name.lowercase(),
@@ -1740,7 +1753,16 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawStrokeElement(
     val base = Color(el.color)
     val c = if (faded) base.copy(alpha = base.alpha * 0.25f) else base
     when (el.tool) {
-        "highlighter" -> drawPath(paths[0], c, blendMode = androidx.compose.ui.graphics.BlendMode.Multiply)
+        "highlighter" -> {
+            // 半透明色带（Multiply 真叠色）+ 两侧略深的墨色沉积边
+            drawPath(paths[0], c, blendMode = androidx.compose.ui.graphics.BlendMode.Multiply)
+            val edge = c.copy(alpha = (c.alpha + 0.12f).coerceAtMost(1f))
+            drawPath(
+                paths[0], edge,
+                style = Stroke(width = (el.width * 0.08f).coerceIn(0.6f, 2.2f)),
+                blendMode = androidx.compose.ui.graphics.BlendMode.Multiply,
+            )
+        }
         "pencil" -> {
             // 石墨干介质：毛糙宽层淡 + 紧实芯层深
             drawPath(paths[0], c.copy(alpha = c.alpha * 0.45f))
@@ -1773,7 +1795,16 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawLiveInk(
 ) {
     val paths = buildInkPaths(tool.name.lowercase(), flat, radii)
     when (tool) {
-        CanvasTool.HIGHLIGHTER -> drawPath(paths[0], color, blendMode = androidx.compose.ui.graphics.BlendMode.Multiply)
+        CanvasTool.HIGHLIGHTER -> {
+            drawPath(paths[0], color, blendMode = androidx.compose.ui.graphics.BlendMode.Multiply)
+            val maxR = radii.maxOrNull() ?: 1f
+            val edge = color.copy(alpha = (color.alpha + 0.12f).coerceAtMost(1f))
+            drawPath(
+                paths[0], edge,
+                style = Stroke(width = (maxR * 2f * 0.08f).coerceIn(0.6f, 2.2f)),
+                blendMode = androidx.compose.ui.graphics.BlendMode.Multiply,
+            )
+        }
         CanvasTool.PENCIL -> {
             drawPath(paths[0], color.copy(alpha = color.alpha * 0.45f))
             if (paths.size > 1) drawPath(paths[1], color.copy(alpha = color.alpha * 0.75f))
@@ -1807,17 +1838,22 @@ private fun widthFactor(
     pointerType: PointerType,
 ): Float = when (tool) {
     CanvasTool.PEN -> {
+        // 秀丽笔：5 支里提按最夸张（毛笔/书法感）
         if (pointerType == PointerType.Stylus && pressure > 0.01f && pressure <= 1.5f) {
-            0.45f + pressure.coerceIn(0f, 1f) * 1.05f // 真实压感优先
+            0.4f + pressure.coerceIn(0f, 1f) * 1.25f // 真实压感优先，对比更大
         } else {
             val s = (speedPxPerMs / 2.5f).coerceIn(0f, 1f)
-            1.45f - s * 0.95f // 慢笔粗、快笔细，模拟提按
+            1.7f - s * 1.25f // 慢笔很粗、快笔很细，提按最强
         }
     }
     CanvasTool.FOUNTAIN -> {
-        // 钢笔：硬尖，几乎恒宽，仅微弱提按
-        val s = (speedPxPerMs / 2.5f).coerceIn(0f, 1f)
-        1.08f - s * 0.22f
+        // 钢笔：硬尖利落，中等提按（介于马克笔恒宽与秀丽笔大幅提按之间）
+        if (pointerType == PointerType.Stylus && pressure > 0.01f && pressure <= 1.5f) {
+            0.7f + pressure.coerceIn(0f, 1f) * 0.6f
+        } else {
+            val s = (speedPxPerMs / 2.5f).coerceIn(0f, 1f)
+            1.25f - s * 0.55f // 慢笔略粗、快笔略细，保留硬尖利落
+        }
     }
     CanvasTool.PENCIL -> {
         val s = (speedPxPerMs / 2.5f).coerceIn(0f, 1f)

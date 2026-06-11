@@ -55,6 +55,18 @@ class InkGeometryTest {
     }
 
     @Test
+    fun `斜口荧光笔横划比竖划宽`() {
+        // 笔尖 135°(-45°)：水平运笔(0°)与垂直运笔(90°)都与笔尖成 45°/135°，对称等宽；
+        // 而 45° 运笔与笔尖平行最细，-45°(135°) 与笔尖垂直最宽。
+        val base = 30f
+        val parallel = InkGeometry.chiselWidth(base, (3.0 * Math.PI / 4.0).toFloat())   // 与笔尖平行
+        val perpend = InkGeometry.chiselWidth(base, (Math.PI / 4.0).toFloat())          // 与笔尖垂直
+        assertTrue("平行运笔应最细：$parallel", parallel < perpend)
+        assertEquals(base * 0.35f, parallel, 0.5f)  // chiselMin
+        assertEquals(base, perpend, 0.5f)           // 满宽
+    }
+
+    @Test
     fun `收笔笔锋递减末端半径`() {
         val radii = mutableListOf(3f, 3f, 3f, 3f, 3f, 3f)
         InkGeometry.taperTail(radii)
