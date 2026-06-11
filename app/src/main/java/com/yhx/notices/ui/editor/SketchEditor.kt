@@ -14,12 +14,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -137,13 +142,29 @@ fun SketchEditor(
                 shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
             ) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
                         SketchTool.entries.forEach { t ->
-                            FilterChip(
-                                selected = tool == t,
-                                onClick = { tool = t },
-                                label = { Text(t.label) },
-                            )
+                            val sel = tool == t
+                            val icon = when (t) {
+                                SketchTool.PEN -> Icons.Default.Edit
+                                SketchTool.PENCIL -> Icons.Default.Create
+                                SketchTool.HIGHLIGHTER -> Icons.Default.Brush
+                                SketchTool.ERASER -> Icons.Default.CleaningServices
+                            }
+                            Box(
+                                Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(if (sel) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                    .clickable { tool = t },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    icon, t.label,
+                                    tint = if (sel) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                            }
                         }
                     }
                     Row(
