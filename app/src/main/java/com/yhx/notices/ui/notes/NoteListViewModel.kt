@@ -73,6 +73,8 @@ class NoteListViewModel @Inject constructor(
 
     suspend fun createNote(): Long = noteRepo.createNote(currentFolderId.value)
 
+    suspend fun createCanvasNote(): Long = noteRepo.createNote(currentFolderId.value, isCanvas = true)
+
     fun deleteSelected() {
         val ids = selection.value.toList()
         if (ids.isEmpty()) return

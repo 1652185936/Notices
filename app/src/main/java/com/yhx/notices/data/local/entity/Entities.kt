@@ -46,6 +46,7 @@ data class NoteEntity(
     val isFavorite: Boolean = false,
     val isEncrypted: Boolean = false,
     val isTodoNote: Boolean = false,
+    val isCanvas: Boolean = false,
     val skin: String = "default",
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),

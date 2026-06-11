@@ -19,7 +19,9 @@ import androidx.compose.material.icons.automirrored.filled.MenuOpen
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
@@ -64,6 +66,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun NotesListScreen(
     onOpenNote: (Long) -> Unit,
+    onOpenCanvas: (Long) -> Unit = {},
     onSearch: () -> Unit = {},
     viewModel: NoteListViewModel = hiltViewModel(),
 ) {
@@ -72,6 +75,7 @@ fun NotesListScreen(
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val inSelection = state.selection.isNotEmpty()
     var showCreateFolder by remember { mutableStateOf(false) }
+    var fabExpanded by remember { mutableStateOf(false) }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -146,10 +150,30 @@ fun NotesListScreen(
             },
             floatingActionButton = {
                 if (!inSelection) {
-                    FloatingActionButton(onClick = {
-                        scope.launch { onOpenNote(viewModel.createNote()) }
-                    }) {
-                        Icon(Icons.Default.Add, contentDescription = "新建笔记")
+                    Column(horizontalAlignment = Alignment.End) {
+                        if (fabExpanded) {
+                            androidx.compose.material3.ExtendedFloatingActionButton(
+                                text = { Text("无界笔记") },
+                                icon = { Icon(Icons.Default.Gesture, null) },
+                                onClick = {
+                                    fabExpanded = false
+                                    scope.launch { onOpenCanvas(viewModel.createCanvasNote()) }
+                                },
+                                modifier = Modifier.padding(bottom = 12.dp),
+                            )
+                            androidx.compose.material3.ExtendedFloatingActionButton(
+                                text = { Text("笔记") },
+                                icon = { Icon(Icons.Default.Edit, null) },
+                                onClick = {
+                                    fabExpanded = false
+                                    scope.launch { onOpenNote(viewModel.createNote()) }
+                                },
+                                modifier = Modifier.padding(bottom = 12.dp),
+                            )
+                        }
+                        FloatingActionButton(onClick = { fabExpanded = !fabExpanded }) {
+                            Icon(Icons.Default.Add, contentDescription = "新建")
+                        }
                     }
                 }
             },
@@ -175,7 +199,11 @@ fun NotesListScreen(
                             selected = note.id in state.selection,
                             selectionMode = inSelection,
                             onClick = {
-                                if (inSelection) viewModel.toggleSelect(note.id) else onOpenNote(note.id)
+                                when {
+                                    inSelection -> viewModel.toggleSelect(note.id)
+                                    note.isCanvas -> onOpenCanvas(note.id)
+                                    else -> onOpenNote(note.id)
+                                }
                             },
                             onLongClick = { viewModel.toggleSelect(note.id) },
                         )
@@ -263,7 +291,11 @@ private fun NoteCard(
                         .background(Color(0x11000000)),
                 )
             }
-            if (note.isEncrypted) {
+            if (note.isCanvas) {
+                Text("🖌 无界笔记", style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 6.dp))
+            } else if (note.isEncrypted) {
                 Text("🔒 已加密", style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp))

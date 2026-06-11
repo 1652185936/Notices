@@ -43,13 +43,37 @@ class NoteRepository @Inject constructor(
     }
 
     /** 新建空笔记，返回其 id。 */
-    suspend fun createNote(folderId: Long?, isTodoNote: Boolean = false): Long {
+    suspend fun createNote(folderId: Long?, isTodoNote: Boolean = false, isCanvas: Boolean = false): Long {
         val now = System.currentTimeMillis()
+        val contentJson = if (isCanvas)
+            com.yhx.notices.domain.canvas.CanvasJson.encode(com.yhx.notices.domain.canvas.CanvasContent())
+        else RichTextJson.encode(NoteContent.empty())
         return noteDao.insert(
             NoteEntity(
-                folderId = folderId, isTodoNote = isTodoNote,
-                contentJson = RichTextJson.encode(NoteContent.empty()),
+                folderId = folderId, isTodoNote = isTodoNote, isCanvas = isCanvas,
+                contentJson = contentJson,
                 createdAt = now, updatedAt = now,
+            )
+        )
+    }
+
+    suspend fun getCanvas(id: Long): com.yhx.notices.domain.canvas.CanvasContent {
+        val e = noteDao.getById(id) ?: return com.yhx.notices.domain.canvas.CanvasContent()
+        return com.yhx.notices.domain.canvas.CanvasJson.decode(e.contentJson)
+    }
+
+    suspend fun saveCanvas(id: Long, title: String, content: com.yhx.notices.domain.canvas.CanvasContent) {
+        val e = noteDao.getById(id) ?: return
+        val texts = content.elements
+            .filterIsInstance<com.yhx.notices.domain.canvas.TextElement>()
+            .joinToString(" ") { it.text }
+        noteDao.update(
+            e.copy(
+                title = title,
+                contentJson = com.yhx.notices.domain.canvas.CanvasJson.encode(content),
+                plainText = texts,
+                updatedAt = System.currentTimeMillis(),
+                syncDirty = true,
             )
         )
     }
@@ -126,7 +150,7 @@ class NoteRepository @Inject constructor(
         excerpt = if (isEncrypted) "" else plainText.replace("\n", " ").take(120),
         firstImagePath = excerptImagePath,
         isPinned = isPinned, isFavorite = isFavorite, isEncrypted = isEncrypted,
-        isTodoNote = isTodoNote, skin = skin, updatedAt = updatedAt,
+        isTodoNote = isTodoNote, isCanvas = isCanvas, skin = skin, updatedAt = updatedAt,
     )
 
     private fun NoteSort.key() = when (this) {

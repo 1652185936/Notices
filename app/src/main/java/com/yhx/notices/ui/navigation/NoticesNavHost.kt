@@ -21,6 +21,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.yhx.notices.ui.canvas.CanvasScreen
 import com.yhx.notices.ui.editor.NoteEditorScreen
 import com.yhx.notices.ui.notes.NotesListScreen
 import com.yhx.notices.ui.search.SearchScreen
@@ -35,7 +36,9 @@ object Routes {
     const val SEARCH = "search"
     const val TRASH = "trash"
     const val EDITOR = "editor/{noteId}"
+    const val CANVAS = "canvas/{noteId}"
     fun editor(noteId: Long) = "editor/$noteId"
+    fun canvas(noteId: Long) = "canvas/$noteId"
 }
 
 private data class BottomTab(val route: String, val label: String, val icon: ImageVector)
@@ -84,6 +87,7 @@ fun NoticesNavHost() {
             composable(Routes.NOTES) {
                 NotesListScreen(
                     onOpenNote = { id -> navController.navigate(Routes.editor(id)) },
+                    onOpenCanvas = { id -> navController.navigate(Routes.canvas(id)) },
                     onSearch = { navController.navigate(Routes.SEARCH) },
                 )
             }
@@ -105,6 +109,12 @@ fun NoticesNavHost() {
                 arguments = listOf(navArgument("noteId") { type = NavType.StringType }),
             ) {
                 NoteEditorScreen(onBack = { navController.popBackStack() })
+            }
+            composable(
+                Routes.CANVAS,
+                arguments = listOf(navArgument("noteId") { type = NavType.StringType }),
+            ) {
+                CanvasScreen(onBack = { navController.popBackStack() })
             }
         }
     }

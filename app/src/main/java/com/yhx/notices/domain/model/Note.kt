@@ -27,6 +27,7 @@ data class NoteListItem(
     val isFavorite: Boolean,
     val isEncrypted: Boolean,
     val isTodoNote: Boolean,
+    val isCanvas: Boolean,
     val skin: String,
     val updatedAt: Long,
 )
