@@ -333,6 +333,17 @@ private val palette = listOf(
     Color(0xFF007DFF), Color(0xFF4C2FBF), Color(0xFF8E8E93),
 )
 private val widths = listOf(3f, 6f, 12f, 20f)
+private val penTools = setOf(CanvasTool.PEN, CanvasTool.PENCIL, CanvasTool.HIGHLIGHTER)
+
+/** 取色网格调色板（华为为 100+，此处精选 36 色）。 */
+private val gridColors = listOf(
+    0x182431, 0x4E5969, 0x86909C, 0xC9CDD4, 0xE5E6EB, 0xFFFFFF,
+    0xFA2A2D, 0xFF5252, 0xFF7875, 0xFF9A2C, 0xFFA940, 0xFFD666,
+    0xFFBB00, 0xFADB14, 0xD3F261, 0x95DE64, 0x52C41A, 0x21A675,
+    0x13C2C2, 0x36CFC9, 0x5CDBD3, 0x40A9FF, 0x007DFF, 0x1D39C4,
+    0x4C2FBF, 0x722ED1, 0x9254DE, 0xB37FEB, 0xEB2F96, 0xFF85C0,
+    0x8B4513, 0xA0522D, 0xC68642, 0xD2B48C, 0x5C3A21, 0x000000,
+).map { Color(0xFF000000 or it.toLong()) }
 
 @OptIn(ExperimentalComposeUiApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -353,6 +364,7 @@ fun CanvasScreen(
     var lassoMoving by remember { mutableStateOf(false) }
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     var showStickers by remember { mutableStateOf(false) }
+    var showBrushPanel by remember { mutableStateOf(false) }
 
     val livePoints = remember { mutableStateListOf<Offset>() }
     val bitmaps = remember { mutableStateMapOf<Long, ImageBitmap?>() }
@@ -455,32 +467,33 @@ fun CanvasScreen(
                 },
             )
         },
-        bottomBar = {
-            CanvasToolbar(
-                tool = tool, onTool = { tool = it },
-                color = color, onColor = { color = it },
-                width = width, onWidth = { width = it },
-                scalePercent = (scale * 100).roundToInt(),
-                onZoomIn = { scale = (scale * 1.25f).coerceAtMost(10f) },
-                onZoomOut = { scale = (scale / 1.25f).coerceAtLeast(0.1f) },
-                onReset = { scale = 1f; offset = Offset.Zero },
-                onImage = {
-                    imagePicker.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                    )
-                },
-                onInsertSpace = {
-                    val cy = screenToWorld(Offset(canvasSize.width / 2f, canvasSize.height / 2f)).y
-                    viewModel.insertVerticalSpace(cy, 400f)
-                },
-                onSticker = { showStickers = true },
-            )
-        },
     ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
+        CanvasToolbar(
+            tool = tool,
+            onTool = { t ->
+                if (t == tool && t in penTools) showBrushPanel = !showBrushPanel
+                else { tool = t; showBrushPanel = t in penTools }
+            },
+            color = color,
+            onOpenBrush = { showBrushPanel = true },
+            scalePercent = (scale * 100).roundToInt(),
+            onZoomIn = { scale = (scale * 1.25f).coerceAtMost(10f) },
+            onZoomOut = { scale = (scale / 1.25f).coerceAtLeast(0.1f) },
+            onReset = { scale = 1f; offset = Offset.Zero },
+            onImage = {
+                imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            },
+            onInsertSpace = {
+                val cy = screenToWorld(Offset(canvasSize.width / 2f, canvasSize.height / 2f)).y
+                viewModel.insertVerticalSpace(cy, 400f)
+            },
+            onSticker = { showStickers = true },
+        )
         Box(
             Modifier
-                .fillMaxSize()
-                .padding(padding)
+                .fillMaxWidth()
+                .weight(1f)
                 .background(Color.White)
                 .onSizeChanged { canvasSize = it }
                 .pointerInput(tool) {
@@ -725,6 +738,20 @@ fun CanvasScreen(
                     )
                 }
             }
+
+            if (showBrushPanel) {
+                BrushPanel(
+                    tool = tool,
+                    onTool = { tool = it },
+                    color = color,
+                    onColor = { color = it },
+                    width = width,
+                    onWidth = { width = it },
+                    onClose = { showBrushPanel = false },
+                    modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+                )
+            }
+        }
         }
     }
 }
@@ -798,9 +825,7 @@ private fun CanvasToolbar(
     tool: CanvasTool,
     onTool: (CanvasTool) -> Unit,
     color: Color,
-    onColor: (Color) -> Unit,
-    width: Float,
-    onWidth: (Float) -> Unit,
+    onOpenBrush: () -> Unit,
     scalePercent: Int,
     onZoomIn: () -> Unit,
     onZoomOut: () -> Unit,
@@ -809,47 +834,79 @@ private fun CanvasToolbar(
     onInsertSpace: () -> Unit,
     onSticker: () -> Unit,
 ) {
+    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp, shadowElevation = 4.dp) {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ToolButton(tool, CanvasTool.MOVE, Icons.Default.PanTool, onTool)
+            ToolButton(tool, CanvasTool.SELECT, Icons.Default.HighlightAlt, onTool)
+            ToolButton(tool, CanvasTool.LASSO, Icons.Default.Gesture, onTool)
+            ToolDivider()
+            ToolButton(tool, CanvasTool.PEN, Icons.Default.Edit, onTool)
+            ToolButton(tool, CanvasTool.PENCIL, Icons.Default.Create, onTool)
+            ToolButton(tool, CanvasTool.HIGHLIGHTER, Icons.Default.Brush, onTool)
+            ToolButton(tool, CanvasTool.SHAPE, Icons.Default.Category, onTool)
+            ToolButton(tool, CanvasTool.ERASER, Icons.Default.CleaningServices, onTool)
+            ToolButton(tool, CanvasTool.TEXT, Icons.Default.TextFields, onTool)
+            ToolDivider()
+            PlainTool(Icons.Default.Image, "图片", onImage)
+            PlainTool(Icons.Default.EmojiEmotions, "贴纸", onSticker)
+            PlainTool(Icons.Default.Height, "插入空白", onInsertSpace)
+            ToolDivider()
+            Box(
+                Modifier.size(28.dp).clip(CircleShape).background(color)
+                    .border(1.dp, Color(0x33000000), CircleShape)
+                    .androidx_clickable(onOpenBrush),
+            )
+            Box(Modifier.width(6.dp))
+            IconButton(onClick = onZoomOut) { Icon(Icons.Default.Remove, "缩小") }
+            Text(
+                "$scalePercent%",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clip(RoundedCornerShape(6.dp)).androidx_clickable(onReset).padding(horizontal = 4.dp, vertical = 4.dp),
+            )
+            IconButton(onClick = onZoomIn) { Icon(Icons.Default.Add, "放大") }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun BrushPanel(
+    tool: CanvasTool,
+    onTool: (CanvasTool) -> Unit,
+    color: Color,
+    onColor: (Color) -> Unit,
+    width: Float,
+    onWidth: (Float) -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Surface(
+        modifier = modifier.width(300.dp),
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 3.dp,
-        shadowElevation = 8.dp,
+        shape = RoundedCornerShape(16.dp),
+        tonalElevation = 6.dp,
+        shadowElevation = 14.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x14000000)),
     ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp)) {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                ToolButton(tool, CanvasTool.MOVE, Icons.Default.PanTool, onTool)
-                ToolButton(tool, CanvasTool.SELECT, Icons.Default.HighlightAlt, onTool)
-                ToolButton(tool, CanvasTool.LASSO, Icons.Default.Gesture, onTool)
-                ToolDivider()
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("笔刷", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                androidx.compose.material3.TextButton(onClick = onClose) { Text("完成") }
+            }
+            Row(Modifier.padding(top = 4.dp)) {
                 ToolButton(tool, CanvasTool.PEN, Icons.Default.Edit, onTool)
                 ToolButton(tool, CanvasTool.PENCIL, Icons.Default.Create, onTool)
                 ToolButton(tool, CanvasTool.HIGHLIGHTER, Icons.Default.Brush, onTool)
-                ToolButton(tool, CanvasTool.SHAPE, Icons.Default.Category, onTool)
-                ToolButton(tool, CanvasTool.ERASER, Icons.Default.CleaningServices, onTool)
-                ToolButton(tool, CanvasTool.TEXT, Icons.Default.TextFields, onTool)
-                ToolDivider()
-                PlainTool(Icons.Default.Image, "图片", onImage)
-                PlainTool(Icons.Default.EmojiEmotions, "贴纸", onSticker)
-                PlainTool(Icons.Default.Height, "插入空白", onInsertSpace)
             }
-            Row(
-                Modifier.fillMaxWidth().padding(top = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                palette.forEach { c -> ColorSwatch(c, c == color, onColor) }
-                Box(Modifier.width(10.dp))
-                widths.forEach { w -> WidthDot(w, w == width, onWidth) }
-                Box(Modifier.weight(1f))
-                IconButton(onClick = onZoomOut) { Icon(Icons.Default.Remove, "缩小") }
-                Text(
-                    "$scalePercent%",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).androidx_clickable(onReset).padding(horizontal = 6.dp, vertical = 4.dp),
-                )
-                IconButton(onClick = onZoomIn) { Icon(Icons.Default.Add, "放大") }
+            Text("粗细", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+            Row { widths.forEach { w -> WidthDot(w, w == width, onWidth) } }
+            Text("颜色", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+            androidx.compose.foundation.layout.FlowRow(Modifier.padding(top = 4.dp)) {
+                gridColors.forEach { c -> ColorSwatch(c, c == color, onColor) }
             }
         }
     }
