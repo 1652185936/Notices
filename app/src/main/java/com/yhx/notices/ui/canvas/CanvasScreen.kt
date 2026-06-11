@@ -37,8 +37,6 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -277,6 +275,278 @@ private fun elementBounds(el: com.yhx.notices.domain.canvas.CanvasElement): Floa
     is ImageElement -> floatArrayOf(el.x, el.y, el.width, el.height)
     is TextElement -> floatArrayOf(el.x, el.y, el.text.length.coerceAtLeast(2) * el.fontSize * 0.6f, el.fontSize * 1.4f)
     else -> null
+}
+
+/** 元素旋转角度（度），无旋转概念的返回 0。 */
+private fun elementRotation(el: com.yhx.notices.domain.canvas.CanvasElement): Float = when (el) {
+    is ImageElement -> el.rotation
+    is TextElement -> el.rotation
+    else -> 0f
+}
+
+/**
+ * 元素未旋转 AABB 的四角绕中心按 rotation 旋转后，再经 world→screen 变换得到屏幕坐标。
+ * 返回 [TL, TR, BR, BL]（左上、右上、右下、左下）。
+ */
+private fun elementScreenCorners(
+    el: com.yhx.notices.domain.canvas.CanvasElement,
+    scale: Float,
+    offset: Offset,
+): List<Offset>? {
+    val b = elementBounds(el) ?: return null
+    val x = b[0]; val y = b[1]; val w = b[2]; val h = b[3]
+    val cx = x + w / 2f; val cy = y + h / 2f
+    val rad = elementRotation(el) * PI.toFloat() / 180f
+    val cosA = cos(rad); val sinA = sin(rad)
+    val raw = listOf(
+        Offset(x, y), Offset(x + w, y), Offset(x + w, y + h), Offset(x, y + h),
+    )
+    return raw.map { p ->
+        val dx = p.x - cx; val dy = p.y - cy
+        val rx = cx + dx * cosA - dy * sinA
+        val ry = cy + dx * sinA + dy * cosA
+        Offset(rx * scale + offset.x, ry * scale + offset.y)
+    }
+}
+
+/**
+ * 选中元素的变换浮层：选择框（旋转后斜框）+ 四角缩放手柄 + 顶部旋转手柄 + 右上删除「×」。
+ * 全部用屏幕坐标 offset{} 定位、各自独立 pointerInput，覆盖在画布之上，优先吃触摸。
+ */
+@Composable
+private fun SelectionOverlay(
+    element: com.yhx.notices.domain.canvas.CanvasElement,
+    scale: Float,
+    offset: Offset,
+    density: androidx.compose.ui.unit.Density,
+    onBegin: () -> Unit,
+    onResize: (Float, Float) -> Unit,
+    onMove: (Float, Float) -> Unit,
+    onFontSize: (Float) -> Unit,
+    onRotate: (Float) -> Unit,
+    onDelete: () -> Unit,
+) {
+    val corners = elementScreenCorners(element, scale, offset) ?: return
+    val tl = corners[0]; val tr = corners[1]; val br = corners[2]; val bl = corners[3]
+    val centerScreen = Offset((tl.x + br.x) / 2f, (tl.y + br.y) / 2f)
+    val rotation = elementRotation(element)
+    val rad = rotation * PI.toFloat() / 180f
+    val isImage = element is ImageElement
+
+    // 拖动期间用最新值（避免重组后闭包读到过期 scale/offset/element）
+    val stateScale by androidx.compose.runtime.rememberUpdatedState(scale)
+    val stateOffset by androidx.compose.runtime.rememberUpdatedState(offset)
+    val stateEl by androidx.compose.runtime.rememberUpdatedState(element)
+
+    fun px(dp: Float): Float = with(density) { dp.dp.toPx() }
+    val handleR = px(9f) // 手柄半径（屏幕像素）
+    val handleSizeDp = with(density) { (handleR * 2).toDp() }
+
+    val topMid = Offset((tl.x + tr.x) / 2f, (tl.y + tr.y) / 2f)
+    val rotHandlePos = Offset(topMid.x + sin(rad) * px(34f), topMid.y - cos(rad) * px(34f))
+
+    // —— 选择框（四角连线）+ 旋转引线 ——
+    Canvas(Modifier.fillMaxSize()) {
+        val lineC = Color(0xFF007DFF)
+        drawLine(lineC, tl, tr, strokeWidth = px(1.5f))
+        drawLine(lineC, tr, br, strokeWidth = px(1.5f))
+        drawLine(lineC, br, bl, strokeWidth = px(1.5f))
+        drawLine(lineC, bl, tl, strokeWidth = px(1.5f))
+        drawLine(lineC, topMid, rotHandlePos, strokeWidth = px(1.5f))
+    }
+
+    // —— 四角缩放手柄 ——
+    // 拖某角时，对角作锚（世界坐标，drag 全程固定）。
+    val cornerPositions = listOf(tl, tr, br, bl)
+    val anchorCorners = listOf(br, bl, tl, tr) // TL↔BR, TR↔BL, BR↔TL, BL↔TR
+    cornerPositions.forEachIndexed { idx, cpos ->
+        val anchorScreen = anchorCorners[idx]
+        Box(
+            Modifier
+                .offset { IntOffset((cpos.x - handleR).roundToInt(), (cpos.y - handleR).roundToInt()) }
+                .size(handleSizeDp)
+                .pointerInput(element.id) {
+                    // 拖动起点：快照锚点世界坐标 + 起始指针屏幕位置
+                    var anchorWorld = Offset.Zero
+                    var startFontSize = 0f
+                    var startBaseW = 1f
+                    var startBaseH = 1f
+                    var dragRad = 0f
+                    var curPointer = Offset.Zero
+                    detectDragGestures(
+                        onDragStart = {
+                            onBegin()
+                            val s = stateScale; val o = stateOffset
+                            anchorWorld = Offset((anchorScreen.x - o.x) / s, (anchorScreen.y - o.y) / s)
+                            curPointer = cpos
+                            val b0 = elementBounds(stateEl)
+                            startBaseW = (b0?.get(2) ?: 1f).coerceAtLeast(1f)
+                            startBaseH = (b0?.get(3) ?: 1f).coerceAtLeast(1f)
+                            startFontSize = (stateEl as? TextElement)?.fontSize ?: 0f
+                            dragRad = elementRotation(stateEl) * PI.toFloat() / 180f
+                        },
+                        onDrag = { change, drag ->
+                            change.consume()
+                            curPointer = Offset(curPointer.x + drag.x, curPointer.y + drag.y)
+                            val s = stateScale; val o = stateOffset
+                            val pWorld = Offset((curPointer.x - o.x) / s, (curPointer.y - o.y) / s)
+                            val dx = pWorld.x - anchorWorld.x
+                            val dy = pWorld.y - anchorWorld.y
+                            // 去旋转投影到元素轴，绝对值即新对角尺寸
+                            val cosA = cos(-dragRad); val sinA = sin(-dragRad)
+                            val localW = abs(dx * cosA - dy * sinA)
+                            val localH = abs(dx * sinA + dy * cosA)
+                            if (isImage) {
+                                val ratio = startBaseH / startBaseW
+                                val newW = maxOf(localW, localH / ratio).coerceAtLeast(24f)
+                                val newH = newW * ratio
+                                // 锚点世界坐标固定：新中心 = 锚 + 朝指针方向的半对角
+                                val dirLen = hypot(dx, dy).coerceAtLeast(1e-3f)
+                                val halfDiag = hypot(newW, newH) / 2f
+                                val cxN = anchorWorld.x + dx / dirLen * halfDiag
+                                val cyN = anchorWorld.y + dy / dirLen * halfDiag
+                                (stateEl as? ImageElement)?.let { img ->
+                                    onResize(newW, newH)
+                                    onMove((cxN - newW / 2f) - img.x, (cyN - newH / 2f) - img.y)
+                                }
+                            } else {
+                                val factor = maxOf(localW / startBaseW, localH / startBaseH)
+                                onFontSize((startFontSize * factor).coerceIn(8f, 200f))
+                            }
+                        },
+                    )
+                },
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                drawCircle(Color.White, radius = handleR, center = center)
+                drawCircle(Color(0xFF007DFF), radius = handleR, center = center, style = Stroke(px(1.5f)))
+            }
+        }
+    }
+
+    // —— 旋转手柄 ——
+    Box(
+        Modifier
+            .offset { IntOffset((rotHandlePos.x - handleR).roundToInt(), (rotHandlePos.y - handleR).roundToInt()) }
+            .size(handleSizeDp)
+            .pointerInput(element.id) {
+                var center0 = centerScreen
+                var cur = rotHandlePos
+                detectDragGestures(
+                    onDragStart = {
+                        onBegin()
+                        cur = rotHandlePos
+                        // 中心屏幕坐标（用最新 scale/offset 重算）
+                        val s = stateScale; val o = stateOffset
+                        val b0 = elementBounds(stateEl)
+                        if (b0 != null) {
+                            val ccx = b0[0] + b0[2] / 2f
+                            val ccy = b0[1] + b0[3] / 2f
+                            center0 = Offset(ccx * s + o.x, ccy * s + o.y)
+                        }
+                    },
+                    onDrag = { change, drag ->
+                        change.consume()
+                        cur = Offset(cur.x + drag.x, cur.y + drag.y)
+                        val ang = atan2(cur.y - center0.y, cur.x - center0.x)
+                        var deg = ang * 180f / PI.toFloat() + 90f // 手柄默认在正上方
+                        deg = ((deg % 360f) + 360f) % 360f
+                        onRotate(deg)
+                    },
+                )
+            },
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            drawCircle(Color(0xFF007DFF), radius = handleR, center = center)
+            drawCircle(Color.White, radius = handleR, center = center, style = Stroke(px(1.5f)))
+        }
+    }
+
+    // —— 删除「×」手柄（右上角外侧）——
+    val delPos = Offset(tr.x + px(2f), tr.y - px(2f))
+    Box(
+        Modifier
+            .offset { IntOffset((delPos.x - handleR).roundToInt(), (delPos.y - handleR).roundToInt()) }
+            .size(handleSizeDp)
+            .clip(CircleShape)
+            .background(Color(0xFFFA2A2D))
+            .androidx_clickable { onDelete() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(HwIcons.Close, "删除", tint = Color.White, modifier = Modifier.size(handleSizeDp * 0.7f))
+    }
+}
+
+/**
+ * 文字样式条（图5）：字号 -/+ 步进 + 一行色点。圆角白卡 + 阴影，与现有浮层风格一致。
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun TextStyleBar(
+    element: TextElement,
+    isSticker: Boolean,
+    onFontSize: (Float) -> Unit,
+    onColor: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        color = if (isSystemInDarkTheme()) Color(0xFF2A2C2E) else Color.White,
+        shape = RoundedCornerShape(16.dp),
+        shadowElevation = 14.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x14000000)),
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            // 字号步进
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("字号", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(10.dp))
+                StepBtn("－") { onFontSize((element.fontSize - 4f).coerceIn(8f, 200f)) }
+                Text(
+                    "${element.fontSize.roundToInt()}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.width(44.dp),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+                StepBtn("＋") { onFontSize((element.fontSize + 4f).coerceIn(8f, 200f)) }
+            }
+            if (!isSticker) {
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    palette.forEach { col ->
+                        val selected = col.toArgb() == element.color
+                        Box(
+                            Modifier
+                                .padding(end = 8.dp)
+                                .size(if (selected) 26.dp else 22.dp)
+                                .clip(CircleShape)
+                                .background(col)
+                                .border(
+                                    width = if (selected) 2.dp else 1.dp,
+                                    color = if (selected) Color(0xFF007DFF) else Color(0x22000000),
+                                    shape = CircleShape,
+                                )
+                                .androidx_clickable { onColor(col.toArgb()) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StepBtn(label: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(34.dp)
+            .clip(CircleShape)
+            .background(if (isSystemInDarkTheme()) Color(0xFF35373B) else Color(0xFFF1F3F5))
+            .androidx_clickable(onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+    }
 }
 
 /**
@@ -888,20 +1158,7 @@ fun CanvasScreen(
                     translate(offset.x, offset.y)
                     scale(scale, scale, pivot = Offset.Zero)
                 }) {
-                    // 选中元素高亮框
-                    selectedId?.let { sid ->
-                        viewModel.elements.firstOrNull { it.id == sid }?.let { el ->
-                            val b = elementBounds(el)
-                            if (b != null) {
-                                drawRect(
-                                    color = Color(0xFF007DFF),
-                                    topLeft = Offset(b[0], b[1]),
-                                    size = androidx.compose.ui.geometry.Size(b[2], b[3]),
-                                    style = Stroke(2f / scale),
-                                )
-                            }
-                        }
-                    }
+                    // 选中元素高亮框已移到 SelectionOverlay（支持旋转后斜框 + 手柄）
                     // 套索路径与多选框
                     if (lassoPoints.size >= 2) {
                         val lp = Path().apply {
@@ -970,12 +1227,32 @@ fun CanvasScreen(
                 }
             }
 
+            // 选中单个 image/text/贴纸：带手柄的选择框（缩放/旋转/删除）+ 文字样式条
             if (selectedId != null && tool == CanvasTool.SELECT) {
-                androidx.compose.material3.FloatingActionButton(
-                    onClick = { selectedId?.let { viewModel.deleteElement(it) }; selectedId = null },
-                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                ) { Icon(Icons.Default.Delete, "删除选中") }
+                val sel = viewModel.elements.firstOrNull { it.id == selectedId }
+                if (sel is ImageElement || sel is TextElement) {
+                    SelectionOverlay(
+                        element = sel,
+                        scale = scale,
+                        offset = offset,
+                        density = density,
+                        onBegin = { viewModel.pushUndoOnce() },
+                        onResize = { newW, newH -> viewModel.resizeImage(sel.id, newW, newH) },
+                        onMove = { dx, dy -> viewModel.moveElement(sel.id, dx, dy) },
+                        onFontSize = { fs -> viewModel.setTextFontSize(sel.id, fs) },
+                        onRotate = { deg -> viewModel.rotateElement(sel.id, deg) },
+                        onDelete = { viewModel.deleteElement(sel.id); selectedId = null },
+                    )
+                    if (sel is TextElement) {
+                        TextStyleBar(
+                            element = sel,
+                            isSticker = sel.fontSize >= 64f && sel.text.length <= 3,
+                            onFontSize = { fs -> viewModel.pushUndoOnce(); viewModel.setTextFontSize(sel.id, fs) },
+                            onColor = { argb -> viewModel.pushUndoOnce(); viewModel.setTextColor(sel.id, argb) },
+                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
+                        )
+                    }
+                }
             }
             if (selectedIds.isNotEmpty() && tool == CanvasTool.LASSO) {
                 val sb = selectionBounds(viewModel.elements, selectedIds)
@@ -1324,14 +1601,21 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCommittedWorld(
             when (el) {
                 is StrokeElement -> drawStrokeElement(el, inkCache, faded)
                 is ImageElement -> bitmaps[el.attachmentId]?.let { bmp ->
-                    drawImage(
-                        image = bmp,
-                        srcOffset = IntOffset.Zero,
-                        srcSize = IntSize(bmp.width, bmp.height),
-                        dstOffset = IntOffset(el.x.roundToInt(), el.y.roundToInt()),
-                        dstSize = IntSize(el.width.roundToInt(), el.height.roundToInt()),
-                        alpha = if (faded) 0.25f else 1f,
-                    )
+                    val drawImg: androidx.compose.ui.graphics.drawscope.DrawScope.() -> Unit = {
+                        drawImage(
+                            image = bmp,
+                            srcOffset = IntOffset.Zero,
+                            srcSize = IntSize(bmp.width, bmp.height),
+                            dstOffset = IntOffset(el.x.roundToInt(), el.y.roundToInt()),
+                            dstSize = IntSize(el.width.roundToInt(), el.height.roundToInt()),
+                            alpha = if (faded) 0.25f else 1f,
+                        )
+                    }
+                    if (el.rotation != 0f) {
+                        withTransform({
+                            rotate(el.rotation, pivot = Offset(el.x + el.width / 2f, el.y + el.height / 2f))
+                        }) { drawImg() }
+                    } else drawImg()
                 }
                 is TextElement -> if (el.id != editingId && el.text.isNotEmpty()) {
                     val paint = android.graphics.Paint().apply {
@@ -1340,7 +1624,19 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCommittedWorld(
                         isAntiAlias = true
                         if (faded) alpha = 64
                     }
-                    drawContext.canvas.nativeCanvas.drawText(el.text, el.x, el.y + el.fontSize, paint)
+                    if (el.rotation != 0f) {
+                        // 与 elementBounds 一致：宽 length*fontSize*0.6、高 fontSize*1.4
+                        val tw = el.text.length.coerceAtLeast(2) * el.fontSize * 0.6f
+                        val cx = el.x + tw / 2f
+                        val cy = el.y + el.fontSize * 0.7f
+                        val nc = drawContext.canvas.nativeCanvas
+                        nc.save()
+                        nc.rotate(el.rotation, cx, cy)
+                        nc.drawText(el.text, el.x, el.y + el.fontSize, paint)
+                        nc.restore()
+                    } else {
+                        drawContext.canvas.nativeCanvas.drawText(el.text, el.x, el.y + el.fontSize, paint)
+                    }
                 }
             }
         }

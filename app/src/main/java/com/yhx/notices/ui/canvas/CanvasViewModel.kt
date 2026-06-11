@@ -127,6 +127,53 @@ class CanvasViewModel @Inject constructor(
         markDirty()
     }
 
+    /** 手势开始时调用一次：压入一步撤销（一次缩放/旋转 = 一步撤销）。 */
+    fun pushUndoOnce() {
+        pushUndo()
+    }
+
+    /** 缩放图片：更新宽高（最小 24f），不改 x/y（锚点由调用方在 move 中补偿）。 */
+    fun resizeImage(id: String, newWidth: Float, newHeight: Float) {
+        val i = elements.indexOfFirst { it.id == id }
+        if (i < 0) return
+        val el = elements[i] as? ImageElement ?: return
+        elements[i] = el.copy(
+            width = newWidth.coerceAtLeast(24f),
+            height = newHeight.coerceAtLeast(24f),
+        )
+        markDirty()
+    }
+
+    /** 旋转 image/text 元素到指定角度（度）。 */
+    fun rotateElement(id: String, rotationDeg: Float) {
+        val i = elements.indexOfFirst { it.id == id }
+        if (i < 0) return
+        when (val el = elements[i]) {
+            is TextElement -> elements[i] = el.copy(rotation = rotationDeg)
+            is ImageElement -> elements[i] = el.copy(rotation = rotationDeg)
+            else -> {}
+        }
+        markDirty()
+    }
+
+    /** 设置文字字号（8f..200f）。 */
+    fun setTextFontSize(id: String, size: Float) {
+        val i = elements.indexOfFirst { it.id == id }
+        if (i < 0) return
+        val el = elements[i] as? TextElement ?: return
+        elements[i] = el.copy(fontSize = size.coerceIn(8f, 200f))
+        markDirty()
+    }
+
+    /** 设置文字颜色（ARGB）。 */
+    fun setTextColor(id: String, colorArgb: Int) {
+        val i = elements.indexOfFirst { it.id == id }
+        if (i < 0) return
+        val el = elements[i] as? TextElement ?: return
+        elements[i] = el.copy(color = colorArgb)
+        markDirty()
+    }
+
     fun moveElement(id: String, dx: Float, dy: Float) {
         val i = elements.indexOfFirst { it.id == id }
         if (i < 0) return

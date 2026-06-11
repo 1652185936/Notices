@@ -44,6 +44,7 @@ data class TextElement(
     val text: String,
     val fontSize: Float = 18f,
     val color: Int = 0xFF182431.toInt(),
+    val rotation: Float = 0f,    // 旋转角度（度），绕元素中心
 ) : CanvasElement
 
 /** 画布上的图片。 */
@@ -56,6 +57,7 @@ data class ImageElement(
     val width: Float,
     val height: Float,
     val attachmentId: Long,
+    val rotation: Float = 0f,    // 旋转角度（度），绕元素中心
 ) : CanvasElement
 
 fun newId(): String = java.util.UUID.randomUUID().toString()
