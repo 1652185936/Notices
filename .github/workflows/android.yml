@@ -8,14 +8,18 @@ on:
 permissions:
   contents: read
 
+env:
+  # android-actions/setup-android 尚无 Node 24 原生版本，提前强制以 Node 24 运行
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -33,7 +37,7 @@ jobs:
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: notices-debug-apk
           path: app/build/outputs/apk/debug/*.apk
