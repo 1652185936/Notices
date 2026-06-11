@@ -266,6 +266,75 @@ object HwIcons {
             stroke("M5.5,19 C5.5,15.2 8.4,13.2 12,13.2 C15.6,13.2 18.5,15.2 18.5,19")
         }
     }
+
+    /** 标题字号（大 T + 小 T） */
+    val TitleSize: ImageVector by lazy {
+        hwIcon("Hw.TitleSize") {
+            stroke("M5,7 H13.4 M9.2,7 V17.6", 1.7f)
+            stroke("M14.6,11.6 H19.6 M17.1,11.6 V17.6", 1.5f)
+        }
+    }
+
+    /** 有序列表（数字 + 横线） */
+    val NumberList: ImageVector by lazy {
+        hwIcon("Hw.NumberList") {
+            stroke("M5,5.6 L6.4,4.9 V8.3", 1.3f)
+            stroke("M5,10.9 C5,10 6.9,9.9 6.9,11 C6.9,11.9 5,12.6 5,13.5 H7", 1.3f)
+            stroke("M5,16.1 H6.9 L5.9,17.4 C6.9,17.4 7.1,18 7.1,18.4 C7.1,19.3 5.4,19.5 5,18.8", 1.3f)
+            stroke("M10,6.5 H19.5 M10,12 H19.5 M10,17.5 H19.5", 1.6f)
+        }
+    }
+
+    /** 相机 */
+    val Camera: ImageVector by lazy {
+        hwIcon("Hw.Camera") {
+            stroke("M9,8 L9.8,6 C9.95,5.6 10.3,5.3 10.75,5.3 H13.25 C13.7,5.3 14.05,5.6 14.2,6 L15,8")
+            stroke("M7,8 H17 C18.4,8 19.5,9.1 19.5,10.5 V16 C19.5,17.4 18.4,18.5 17,18.5 H7 C5.6,18.5 4.5,17.4 4.5,16 V10.5 C4.5,9.1 5.6,8 7,8 Z")
+            stroke("M12,10.3 a3,3 0 1 1 -0.01,0 Z")
+        }
+    }
+
+    /** 麦克风（录音） */
+    val Mic: ImageVector by lazy {
+        hwIcon("Hw.Mic") {
+            stroke("M11.99,4.4 C13.32,4.4 14.4,5.48 14.4,6.81 V10.6 C14.4,11.93 13.32,13 11.99,13 C10.67,13 9.6,11.93 9.6,10.6 V6.81 C9.6,5.48 10.67,4.4 11.99,4.4 Z")
+            stroke("M6.9,11.2 C6.9,14.2 9.1,16.2 12,16.2 C14.9,16.2 17.1,14.2 17.1,11.2")
+            stroke("M12,16.2 V19.2 M9.4,19.2 H14.6")
+        }
+    }
+
+    /** 语音转文字（声纹条） */
+    val Waveform: ImageVector by lazy {
+        hwIcon("Hw.Waveform") {
+            stroke("M5,10.2 V13.8 M8.5,7.6 V16.4 M12,5.4 V18.6 M15.5,8.6 V15.4 M19,10.6 V13.4", 1.7f)
+        }
+    }
+
+    /** 表格 */
+    val Table: ImageVector by lazy {
+        hwIcon("Hw.Table") {
+            stroke("M7,5.5 H17 C18.4,5.5 19.5,6.6 19.5,8 V16 C19.5,17.4 18.4,18.5 17,18.5 H7 C5.6,18.5 4.5,17.4 4.5,16 V8 C4.5,6.6 5.6,5.5 7,5.5 Z")
+            stroke("M12,5.5 V18.5 M4.5,12 H19.5")
+        }
+    }
+
+    /** 分割线 */
+    val DividerLine: ImageVector by lazy {
+        hwIcon("Hw.DividerLine") {
+            stroke("M6.5,7.2 H17.5", 1.3f)
+            stroke("M4.5,12 H19.5", 1.8f)
+            stroke("M6.5,16.8 H17.5", 1.3f)
+        }
+    }
+
+    /** 手写画板（斜笔 + 笔迹波浪） */
+    val Sketch: ImageVector by lazy {
+        hwIcon("Hw.Sketch") {
+            stroke("M11.6,13.2 L16.9,7.9 C17.6,7.2 18.7,7.2 19.4,7.9 C20.1,8.6 20.1,9.7 19.4,10.4 L14.1,15.7")
+            fill("M11.6,13.2 L14.1,15.7 L10.3,17 Z")
+            stroke("M4.4,19.3 C6.2,17.9 8,20 9.8,18.6", 1.6f)
+        }
+    }
 }
 
 /** 构建 24×24 视口的 ImageVector。 */

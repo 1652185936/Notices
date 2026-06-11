@@ -14,9 +14,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -156,24 +158,54 @@ fun NoteEditorScreen(
     Box(Modifier.fillMaxSize()) {
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {},
-                navigationIcon = {
-                    IconButton(onClick = { viewModel.onExit(); onBack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = viewModel::undo, enabled = viewModel.canUndo) {
-                        Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "撤销")
-                    }
-                    IconButton(onClick = viewModel::redo, enabled = viewModel.canRedo) {
-                        Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "重做")
-                    }
-                    var menuOpen by remember { mutableStateOf(false) }
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "更多")
-                    }
+            val dark = androidx.compose.foundation.isSystemInDarkTheme()
+            val barBg = if (dark) Color(0xFF1E2022) else Color(0xFFF1F3F5)
+            val circleBg = if (dark) Color(0xFF35373B) else Color(0xFFE7E9EC)
+            val ink = if (dark) Color(0xFFE6E8EA) else Color(0xFF1B1D1F)
+            val inkDisabled = if (dark) Color(0xFF5A5E62) else Color(0xFFB9BDC1)
+            androidx.compose.foundation.layout.Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(barBg)
+                    .statusBarsPadding()
+                    .height(54.dp)
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                androidx.compose.foundation.layout.Box(
+                    Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(circleBg)
+                        .clickable { viewModel.onExit(); onBack() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(com.yhx.notices.ui.icons.HwIcons.Back, "返回", tint = ink, modifier = Modifier.size(20.dp))
+                }
+                androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+                IconButton(onClick = viewModel::undo, enabled = viewModel.canUndo) {
+                    Icon(
+                        com.yhx.notices.ui.icons.HwIcons.Undo, "撤销",
+                        tint = if (viewModel.canUndo) ink else inkDisabled, modifier = Modifier.size(22.dp),
+                    )
+                }
+                IconButton(onClick = viewModel::redo, enabled = viewModel.canRedo) {
+                    Icon(
+                        com.yhx.notices.ui.icons.HwIcons.Redo, "重做",
+                        tint = if (viewModel.canRedo) ink else inkDisabled, modifier = Modifier.size(22.dp),
+                    )
+                }
+                androidx.compose.foundation.layout.Spacer(Modifier.width(6.dp))
+                var menuOpen by remember { mutableStateOf(false) }
+                androidx.compose.foundation.layout.Box(
+                    Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(circleBg)
+                        .clickable { menuOpen = true },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(com.yhx.notices.ui.icons.HwIcons.GridMenu, "更多", tint = ink, modifier = Modifier.size(20.dp))
                     androidx.compose.material3.DropdownMenu(
                         expanded = menuOpen,
                         onDismissRequest = { menuOpen = false },
@@ -225,8 +257,8 @@ fun NoteEditorScreen(
                             onClick = { menuOpen = false; viewModel.deleteNote(onBack) },
                         )
                     }
-                },
-            )
+                }
+            }
         },
         bottomBar = {
             Column {

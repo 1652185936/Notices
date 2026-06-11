@@ -1,107 +1,100 @@
 package com.yhx.notices.ui.editor
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Draw
-import androidx.compose.material.icons.filled.FormatBold
-import androidx.compose.material.icons.filled.FormatItalic
-import androidx.compose.material.icons.filled.FormatListBulleted
-import androidx.compose.material.icons.filled.FormatListNumbered
-import androidx.compose.material.icons.filled.FormatStrikethrough
-import androidx.compose.material.icons.filled.FormatUnderlined
-import androidx.compose.material.icons.filled.GridOn
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.KeyboardVoice
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.PhotoCamera
-import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material.icons.filled.Title
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.yhx.notices.domain.richtext.InlineStyles
 import com.yhx.notices.domain.richtext.TextKind
+import com.yhx.notices.ui.icons.HwIcons
 
 private val palette = listOf(
     0x182431, 0xFA2A2D, 0xFF7500, 0xFFBB00, 0x21A675, 0x007DFF, 0x4C2FBF, 0x8E8E93
 )
 private val highlights = listOf(0xFFF59D, 0xC8E6C9, 0xBBDEFB, 0xF8BBD0, 0xFFE0B2)
 
+/** 工具条墨色（随深浅色模式）。 */
+@Composable
+private fun barInk(): Color = if (isSystemInDarkTheme()) Color(0xFFE6E8EA) else Color(0xFF1B1D1F)
+
+/** 选中底色（华为淡蓝）。 */
+@Composable
+private fun barSelBg(): Color = if (isSystemInDarkTheme()) Color(0xFF234A77) else Color(0xFFD6E6FF)
+
+/** 工具条底色。 */
+@Composable
+private fun barBg(): Color = if (isSystemInDarkTheme()) Color(0xFF26282B) else Color(0xFFFCFCFE)
+
+/** 格式工具条：字形按钮(B/I/U/S) + 标题/列表 + 颜色/高亮（华为样式）。 */
 @Composable
 fun FormatToolbar(vm: NoteEditorViewModel) {
-    Surface(tonalElevation = 2.dp) {
+    val ink = barInk()
+    Column(Modifier.background(barBg())) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x14000000)))
         Row(
             Modifier
                 .fillMaxWidth()
+                .height(44.dp)
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 4.dp),
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            ToggleIcon(Icons.Default.FormatBold, "加粗", vm.isStyleActive(InlineStyles.BOLD)) {
+            GlyphButton("B", TextStyle(fontWeight = FontWeight.Bold), vm.isStyleActive(InlineStyles.BOLD), ink) {
                 vm.applyStyle(InlineStyles.BOLD)
             }
-            ToggleIcon(Icons.Default.FormatItalic, "斜体", vm.isStyleActive(InlineStyles.ITALIC)) {
+            GlyphButton("I", TextStyle(fontStyle = FontStyle.Italic), vm.isStyleActive(InlineStyles.ITALIC), ink) {
                 vm.applyStyle(InlineStyles.ITALIC)
             }
-            ToggleIcon(Icons.Default.FormatUnderlined, "下划线", vm.isStyleActive(InlineStyles.UNDERLINE)) {
+            GlyphButton("U", TextStyle(textDecoration = TextDecoration.Underline), vm.isStyleActive(InlineStyles.UNDERLINE), ink) {
                 vm.applyStyle(InlineStyles.UNDERLINE)
             }
-            ToggleIcon(Icons.Default.FormatStrikethrough, "删除线", vm.isStyleActive(InlineStyles.STRIKE)) {
+            GlyphButton("S", TextStyle(textDecoration = TextDecoration.LineThrough), vm.isStyleActive(InlineStyles.STRIKE), ink) {
                 vm.applyStyle(InlineStyles.STRIKE)
             }
-            ToggleIcon(Icons.Default.Title, "标题", false) { vm.changeKind(TextKind.H2) }
-            ToggleIcon(Icons.Default.FormatListBulleted, "无序列表", false) { vm.changeKind(TextKind.BULLET) }
-            ToggleIcon(Icons.Default.FormatListNumbered, "有序列表", false) { vm.changeKind(TextKind.NUMBERED) }
-            ToggleIcon(Icons.Default.CheckCircle, "清单", false) { vm.toggleChecklistKind() }
-
+            BarDivider()
+            BarIcon(HwIcons.TitleSize, "标题", false, ink) { vm.changeKind(TextKind.H2) }
+            BarIcon(HwIcons.ViewList, "无序列表", false, ink) { vm.changeKind(TextKind.BULLET) }
+            BarIcon(HwIcons.NumberList, "有序列表", false, ink) { vm.changeKind(TextKind.NUMBERED) }
+            BarIcon(HwIcons.TodoCheck, "清单", false, ink) { vm.toggleChecklistKind() }
+            BarDivider()
             palette.forEach { rgb ->
-                ColorDot(Color(0xFF000000 or rgb.toLong())) { vm.applyStyle(InlineStyles.color(rgb)) }
+                InkDot(Color(0xFF000000 or rgb.toLong())) { vm.applyStyle(InlineStyles.color(rgb)) }
             }
+            BarDivider()
             highlights.forEach { rgb ->
-                ColorDot(Color(0xFF000000 or rgb.toLong()), ring = true) {
-                    vm.applyStyle(InlineStyles.highlight(rgb))
-                }
+                HighlightDot(Color(0xFF000000 or rgb.toLong())) { vm.applyStyle(InlineStyles.highlight(rgb)) }
             }
         }
     }
 }
 
-@Composable
-private fun ToggleIcon(icon: ImageVector, desc: String, active: Boolean, onClick: () -> Unit) {
-    IconButton(onClick = onClick) {
-        Icon(
-            icon,
-            contentDescription = desc,
-            tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun ColorDot(color: Color, ring: Boolean = false, onClick: () -> Unit) {
-    IconButton(onClick = onClick) {
-        androidx.compose.foundation.layout.Box(
-            Modifier
-                .background(color, if (ring) RoundedCornerShape(4.dp) else CircleShape)
-                .padding(10.dp)
-        ) {}
-    }
-}
-
+/** 插入工具条：图片/拍照/清单/手写/录音/语音/表格/分割线（华为样式）。 */
 @Composable
 fun InsertBar(
     onImage: () -> Unit,
@@ -113,37 +106,86 @@ fun InsertBar(
     onTable: () -> Unit,
     onDivider: () -> Unit,
 ) {
-    Surface {
+    val ink = barInk()
+    Column(Modifier.background(barBg())) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x14000000)))
         Row(
             Modifier
                 .fillMaxWidth()
+                .height(44.dp)
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 4.dp, vertical = 2.dp),
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onImage) {
-                Icon(Icons.Default.Image, contentDescription = "插入图片")
-            }
-            IconButton(onClick = onCamera) {
-                Icon(Icons.Default.PhotoCamera, contentDescription = "拍照")
-            }
-            IconButton(onClick = onChecklist) {
-                Icon(Icons.Default.CheckCircle, contentDescription = "插入清单")
-            }
-            IconButton(onClick = onSketch) {
-                Icon(Icons.Default.Draw, contentDescription = "手写")
-            }
-            IconButton(onClick = onAudio) {
-                Icon(Icons.Default.Mic, contentDescription = "录音")
-            }
-            IconButton(onClick = onVoice) {
-                Icon(Icons.Default.KeyboardVoice, contentDescription = "语音转文字")
-            }
-            IconButton(onClick = onTable) {
-                Icon(Icons.Default.GridOn, contentDescription = "表格")
-            }
-            IconButton(onClick = onDivider) {
-                Icon(Icons.Default.Remove, contentDescription = "分割线")
-            }
+            BarIcon(HwIcons.Image, "插入图片", false, ink, onImage)
+            BarIcon(HwIcons.Camera, "拍照", false, ink, onCamera)
+            BarIcon(HwIcons.TodoCheck, "插入清单", false, ink, onChecklist)
+            BarIcon(HwIcons.Sketch, "手写", false, ink, onSketch)
+            BarIcon(HwIcons.Mic, "录音", false, ink, onAudio)
+            BarIcon(HwIcons.Waveform, "语音转文字", false, ink, onVoice)
+            BarIcon(HwIcons.Table, "表格", false, ink, onTable)
+            BarIcon(HwIcons.DividerLine, "分割线", false, ink, onDivider)
+        }
+    }
+}
+
+/** 字形格式按钮（B/I/U/S 直接用排版字形呈现）。 */
+@Composable
+private fun GlyphButton(glyph: String, style: TextStyle, active: Boolean, ink: Color, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .padding(horizontal = 2.dp)
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(if (active) barSelBg() else Color.Transparent)
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(glyph, style = style.copy(fontSize = 17.sp, color = ink))
+    }
+}
+
+/** 图标按钮（36dp 圆形点击域，选中淡蓝底）。 */
+@Composable
+private fun BarIcon(icon: ImageVector, desc: String, active: Boolean, ink: Color, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .padding(horizontal = 2.dp)
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(if (active) barSelBg() else Color.Transparent)
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, desc, tint = ink, modifier = Modifier.size(21.dp))
+    }
+}
+
+@Composable
+private fun BarDivider() {
+    Box(Modifier.padding(horizontal = 6.dp).width(1.dp).height(18.dp).background(Color(0x1F000000)))
+}
+
+/** 文字颜色点。 */
+@Composable
+private fun InkDot(color: Color, onClick: () -> Unit) {
+    Box(
+        Modifier.padding(horizontal = 2.dp).size(32.dp).clip(CircleShape).clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.size(18.dp).background(color, CircleShape))
+    }
+}
+
+/** 高亮色块（圆角方块示意荧光底色）。 */
+@Composable
+private fun HighlightDot(color: Color, onClick: () -> Unit) {
+    Box(
+        Modifier.padding(horizontal = 2.dp).size(32.dp).clip(RoundedCornerShape(8.dp)).clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.size(18.dp).background(color, RoundedCornerShape(5.dp))) {
+            Text("A", fontSize = 11.sp, color = Color(0xCC1B1D1F), modifier = Modifier.align(Alignment.Center))
         }
     }
 }
