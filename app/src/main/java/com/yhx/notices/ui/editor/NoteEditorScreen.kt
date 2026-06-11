@@ -199,6 +199,10 @@ fun NoteEditorScreen(
                             },
                         )
                         androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("信纸样式") },
+                            onClick = { viewModel.cycleSkin(); menuOpen = false },
+                        )
+                        androidx.compose.material3.DropdownMenuItem(
                             text = { Text("删除") },
                             onClick = { menuOpen = false; viewModel.deleteNote(onBack) },
                         )
@@ -234,10 +238,10 @@ fun NoteEditorScreen(
             }
         },
     ) { innerPadding ->
+        Box(Modifier.fillMaxSize().padding(innerPadding)) {
+        PaperBackground(viewModel.skin)
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
         ) {
             item(key = "title") {
@@ -266,6 +270,7 @@ fun NoteEditorScreen(
             items(viewModel.blocks, key = { it.id }) { block ->
                 BlockRenderer(block, viewModel) { p -> viewerPath = p }
             }
+        }
         }
     }
 
@@ -412,6 +417,37 @@ private fun RecordingBar(
             Box(Modifier.weight(1f))
             androidx.compose.material3.TextButton(onClick = onCancel) { Text("取消") }
             androidx.compose.material3.Button(onClick = onStop) { Text("完成") }
+        }
+    }
+}
+
+@Composable
+private fun PaperBackground(skin: String) {
+    if (skin == "default") return
+    val lineColor = Color(0x11000000)
+    androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+        val spacing = 40.dp.toPx()
+        when (skin) {
+            "lines", "grid" -> {
+                var y = spacing
+                while (y < size.height) {
+                    drawLine(lineColor, Offset(0f, y), Offset(size.width, y), 1f); y += spacing
+                }
+                if (skin == "grid") {
+                    var x = spacing
+                    while (x < size.width) {
+                        drawLine(lineColor, Offset(x, 0f), Offset(x, size.height), 1f); x += spacing
+                    }
+                }
+            }
+            "dots" -> {
+                var y = spacing
+                while (y < size.height) {
+                    var x = spacing
+                    while (x < size.width) { drawCircle(lineColor, 2f, Offset(x, y)); x += spacing }
+                    y += spacing
+                }
+            }
         }
     }
 }

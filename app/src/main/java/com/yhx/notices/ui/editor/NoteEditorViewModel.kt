@@ -63,6 +63,7 @@ class NoteEditorViewModel @Inject constructor(
     var isPinned by mutableStateOf(false); private set
     var isFavorite by mutableStateOf(false); private set
     var isRecording by mutableStateOf(false); private set
+    var skin by mutableStateOf("default"); private set
 
     private var loaded: Note? = null
     private var dirty = false
@@ -99,10 +100,18 @@ class NoteEditorViewModel @Inject constructor(
             isPinned = note.isPinned
             isFavorite = note.isFavorite
             encrypted = note.isEncrypted
+            skin = note.skin
             blocks.clear()
             blocks.addAll(note.content.blocks)
             focusedBlockId = blocks.firstOrNull()?.id
         }
+    }
+
+    fun cycleSkin() {
+        val order = listOf("default", "lines", "grid", "dots")
+        skin = order[(order.indexOf(skin).coerceAtLeast(0) + 1) % order.size]
+        loaded = loaded?.copy(skin = skin)
+        markDirty()
     }
 
     fun toggleEncryption() {
