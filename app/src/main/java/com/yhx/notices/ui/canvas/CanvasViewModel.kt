@@ -137,6 +137,29 @@ class CanvasViewModel @Inject constructor(
         }
     }
 
+    /** 套索：按 id 集合整体平移（笔迹平移所有点）。 */
+    fun moveElementsBy(ids: Set<String>, dx: Float, dy: Float) {
+        if (ids.isEmpty()) return
+        ids.forEach { id ->
+            val i = elements.indexOfFirst { it.id == id }
+            if (i < 0) return@forEach
+            elements[i] = when (val el = elements[i]) {
+                is StrokeElement -> el.copy(points = el.points.mapIndexed { idx, v -> if (idx % 2 == 0) v + dx else v + dy })
+                is TextElement -> el.copy(x = el.x + dx, y = el.y + dy)
+                is ImageElement -> el.copy(x = el.x + dx, y = el.y + dy)
+                else -> el
+            }
+        }
+        markDirty()
+    }
+
+    fun deleteElements(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        pushUndo()
+        elements.removeAll { it.id in ids }
+        markDirty()
+    }
+
     fun deleteElement(id: String) {
         pushUndo()
         elements.removeAll { it.id == id }

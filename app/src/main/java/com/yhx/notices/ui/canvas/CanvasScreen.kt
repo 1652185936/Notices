@@ -74,7 +74,56 @@ import com.yhx.notices.domain.canvas.TextElement
 import kotlin.math.roundToInt
 
 enum class CanvasTool(val label: String) {
-    MOVE("移动"), SELECT("选择"), PEN("钢笔"), PENCIL("铅笔"), HIGHLIGHTER("荧光笔"), ERASER("橡皮"), TEXT("文字")
+    MOVE("移动"), SELECT("选择"), LASSO("套索"), PEN("钢笔"), PENCIL("铅笔"), HIGHLIGHTER("荧光笔"), ERASER("橡皮"), TEXT("文字")
+}
+
+/** 射线法判断点是否在多边形（扁平 x,y 序列）内。 */
+private fun pointInPolygon(px: Float, py: Float, poly: List<Float>): Boolean {
+    if (poly.size < 6) return false
+    var inside = false
+    val n = poly.size / 2
+    var j = n - 1
+    for (i in 0 until n) {
+        val xi = poly[i * 2]; val yi = poly[i * 2 + 1]
+        val xj = poly[j * 2]; val yj = poly[j * 2 + 1]
+        if (((yi > py) != (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi + 1e-6f) + xi)) inside = !inside
+        j = i
+    }
+    return inside
+}
+
+/** 套索选择：笔迹任一点在多边形内即选中；文字/图片按中心点。 */
+private fun lassoSelect(elements: List<com.yhx.notices.domain.canvas.CanvasElement>, poly: List<Float>): Set<String> {
+    val result = HashSet<String>()
+    for (el in elements) {
+        when (el) {
+            is StrokeElement -> {
+                var i = 0
+                while (i + 1 < el.points.size) {
+                    if (pointInPolygon(el.points[i], el.points[i + 1], poly)) { result.add(el.id); break }
+                    i += 2
+                }
+            }
+            is TextElement -> if (pointInPolygon(el.x + 20, el.y + el.fontSize / 2, poly)) result.add(el.id)
+            is ImageElement -> if (pointInPolygon(el.x + el.width / 2, el.y + el.height / 2, poly)) result.add(el.id)
+        }
+    }
+    return result
+}
+
+/** 选中集合的世界包围盒 [minX,minY,maxX,maxY]，空返回 null。 */
+private fun selectionBounds(elements: List<com.yhx.notices.domain.canvas.CanvasElement>, ids: Set<String>): FloatArray? {
+    if (ids.isEmpty()) return null
+    var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+    fun acc(x: Float, y: Float) { minX = minOf(minX, x); minY = minOf(minY, y); maxX = maxOf(maxX, x); maxY = maxOf(maxY, y) }
+    elements.filter { it.id in ids }.forEach { el ->
+        when (el) {
+            is StrokeElement -> { var i = 0; while (i + 1 < el.points.size) { acc(el.points[i], el.points[i + 1]); i += 2 } }
+            is TextElement -> { acc(el.x, el.y); acc(el.x + 40, el.y + el.fontSize) }
+            is ImageElement -> { acc(el.x, el.y); acc(el.x + el.width, el.y + el.height) }
+        }
+    }
+    return if (minX == Float.MAX_VALUE) null else floatArrayOf(minX, minY, maxX, maxY)
 }
 
 /** 返回元素包围盒 [x, y, w, h]，笔迹不可选返回 null。 */
@@ -119,6 +168,9 @@ fun CanvasScreen(
     var editingId by remember { mutableStateOf<String?>(null) }
     var selectedId by remember { mutableStateOf<String?>(null) }
     var draggingId by remember { mutableStateOf<String?>(null) }
+    val lassoPoints = remember { mutableStateListOf<Offset>() }
+    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var lassoMoving by remember { mutableStateOf(false) }
 
     val livePoints = remember { mutableStateListOf<Offset>() }
     val bitmaps = remember { mutableStateMapOf<Long, ImageBitmap?>() }
@@ -261,6 +313,33 @@ fun CanvasScreen(
                             val w = screenToWorld(p)
                             editingId = viewModel.addText(w.x, w.y)
                         }
+                        CanvasTool.LASSO -> detectDragGestures(
+                            onDragStart = { p ->
+                                val w = screenToWorld(p)
+                                val box = selectionBounds(viewModel.elements, selectedIds)
+                                if (box != null && w.x in box[0]..box[2] && w.y in box[1]..box[3]) {
+                                    lassoMoving = true
+                                } else {
+                                    lassoMoving = false
+                                    selectedIds = emptySet()
+                                    lassoPoints.clear(); lassoPoints.add(w)
+                                }
+                            },
+                            onDrag = { change, drag ->
+                                change.consume()
+                                if (lassoMoving) viewModel.moveElementsBy(selectedIds, drag.x / scale, drag.y / scale)
+                                else lassoPoints.add(screenToWorld(change.position))
+                            },
+                            onDragEnd = {
+                                if (!lassoMoving) {
+                                    val poly = ArrayList<Float>(lassoPoints.size * 2)
+                                    lassoPoints.forEach { poly.add(it.x); poly.add(it.y) }
+                                    selectedIds = lassoSelect(viewModel.elements, poly)
+                                    lassoPoints.clear()
+                                }
+                                lassoMoving = false
+                            },
+                        )
                         CanvasTool.SELECT -> detectDragGestures(
                             onDragStart = { p ->
                                 draggingId = hitTest(viewModel.elements, screenToWorld(p))
@@ -348,6 +427,33 @@ fun CanvasScreen(
                             }
                         }
                     }
+                    // 套索路径与多选框
+                    if (lassoPoints.size >= 2) {
+                        val lp = Path().apply {
+                            moveTo(lassoPoints.first().x, lassoPoints.first().y)
+                            for (i in 1 until lassoPoints.size) lineTo(lassoPoints[i].x, lassoPoints[i].y)
+                        }
+                        drawPath(
+                            lp, color = Color(0xFF007DFF),
+                            style = Stroke(
+                                2f / scale,
+                                pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(12f, 8f)),
+                            ),
+                        )
+                    }
+                    selectionBounds(viewModel.elements, selectedIds)?.let { b ->
+                        drawRect(
+                            color = Color(0x22007DFF),
+                            topLeft = Offset(b[0], b[1]),
+                            size = androidx.compose.ui.geometry.Size(b[2] - b[0], b[3] - b[1]),
+                        )
+                        drawRect(
+                            color = Color(0xFF007DFF),
+                            topLeft = Offset(b[0], b[1]),
+                            size = androidx.compose.ui.geometry.Size(b[2] - b[0], b[3] - b[1]),
+                            style = Stroke(2f / scale),
+                        )
+                    }
                     // 实时预览笔迹
                     if (livePoints.size >= 2) {
                         val path = Path().apply {
@@ -368,6 +474,13 @@ fun CanvasScreen(
                     modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
                     containerColor = MaterialTheme.colorScheme.errorContainer,
                 ) { Icon(Icons.Default.Delete, "删除选中") }
+            }
+            if (selectedIds.isNotEmpty() && tool == CanvasTool.LASSO) {
+                androidx.compose.material3.FloatingActionButton(
+                    onClick = { viewModel.deleteElements(selectedIds); selectedIds = emptySet() },
+                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                ) { Icon(Icons.Default.Delete, "删除选中 (${selectedIds.size})") }
             }
 
             // 正在编辑的文字框（覆盖在画布上，按世界→屏幕定位）
