@@ -13,8 +13,8 @@ class FolderRepository @Inject constructor(
 ) {
     fun observeFolders(): Flow<List<FolderWithCount>> = folderDao.observeFoldersWithCount()
 
-    suspend fun create(name: String, color: Int): Long =
-        folderDao.insert(FolderEntity(name = name, color = color))
+    suspend fun create(name: String, color: Int, parentId: Long? = null): Long =
+        folderDao.insert(FolderEntity(name = name, color = color, parentId = parentId))
 
     suspend fun rename(folder: FolderEntity, name: String) =
         folderDao.update(folder.copy(name = name))

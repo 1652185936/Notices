@@ -18,7 +18,7 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): NoticesDatabase =
         Room.databaseBuilder(context, NoticesDatabase::class.java, NoticesDatabase.NAME)
-            .addMigrations(NoticesDatabase.MIGRATION_1_2)
+            .addMigrations(NoticesDatabase.MIGRATION_1_2, NoticesDatabase.MIGRATION_2_3)
             .build()
 
     @Provides fun provideNoteDao(db: NoticesDatabase) = db.noteDao()

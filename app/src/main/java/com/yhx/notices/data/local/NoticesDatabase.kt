@@ -19,7 +19,7 @@ import com.yhx.notices.data.local.entity.TagEntity
 import com.yhx.notices.data.local.entity.TodoEntity
 
 @Database(
-    version = 2,
+    version = 3,
     entities = [
         NoteEntity::class, NoteFtsEntity::class, FolderEntity::class,
         TagEntity::class, NoteTagCrossRef::class, AttachmentEntity::class,
@@ -42,6 +42,12 @@ abstract class NoticesDatabase : RoomDatabase() {
         val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE notes ADD COLUMN isCanvas INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE folders ADD COLUMN parentId INTEGER")
             }
         }
     }

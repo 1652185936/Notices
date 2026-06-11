@@ -97,7 +97,7 @@ class NoteListViewModel @Inject constructor(
         viewModelScope.launch { prefs.setSort(sort) }
     }
 
-    fun createFolder(name: String) {
-        viewModelScope.launch { folderRepo.create(name, 0xFF007DFF.toInt()) }
+    fun createFolder(name: String, parentId: Long? = null) {
+        viewModelScope.launch { folderRepo.create(name, 0xFF007DFF.toInt(), parentId) }
     }
 }

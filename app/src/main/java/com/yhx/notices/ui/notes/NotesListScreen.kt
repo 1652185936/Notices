@@ -96,7 +96,7 @@ fun NotesListScreen(
                     },
                     modifier = Modifier.padding(horizontal = 12.dp),
                 )
-                state.folders.forEach { folder ->
+                folderTree(state.folders).forEach { (folder, depth) ->
                     NavigationDrawerItem(
                         icon = { Icon(Icons.Default.Folder, null) },
                         label = { Text("${folder.folder.name}  (${folder.noteCount})") },
@@ -105,7 +105,7 @@ fun NotesListScreen(
                             viewModel.selectFolder(folder.folder.id)
                             scope.launch { drawerState.close() }
                         },
-                        modifier = Modifier.padding(horizontal = 12.dp),
+                        modifier = Modifier.padding(start = (12 + depth * 16).dp, end = 12.dp),
                     )
                 }
                 NavigationDrawerItem(
@@ -215,18 +215,36 @@ fun NotesListScreen(
 
     if (showCreateFolder) {
         var name by remember { mutableStateOf("") }
+        val currentFolder = state.folders.firstOrNull { it.folder.id == state.currentFolderId }?.folder
+        var asChild by remember { mutableStateOf(currentFolder != null) }
         AlertDialog(
             onDismissRequest = { showCreateFolder = false },
             title = { Text("新建文件夹") },
             text = {
-                OutlinedTextField(
-                    value = name, onValueChange = { name = it },
-                    singleLine = true, label = { Text("文件夹名") },
-                )
+                Column {
+                    OutlinedTextField(
+                        value = name, onValueChange = { name = it },
+                        singleLine = true, label = { Text("文件夹名") },
+                    )
+                    if (currentFolder != null) {
+                        androidx.compose.foundation.layout.Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 8.dp),
+                        ) {
+                            androidx.compose.material3.Checkbox(
+                                checked = asChild, onCheckedChange = { asChild = it },
+                            )
+                            Text("作为「${currentFolder.name}」的子文件夹")
+                        }
+                    }
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
-                    if (name.isNotBlank()) viewModel.createFolder(name.trim())
+                    if (name.isNotBlank()) {
+                        val parent = if (asChild) currentFolder?.id else null
+                        viewModel.createFolder(name.trim(), parent)
+                    }
                     showCreateFolder = false
                 }) { Text("创建") }
             },
@@ -235,6 +253,22 @@ fun NotesListScreen(
             },
         )
     }
+}
+
+/** 把扁平文件夹列表按 parentId 组织成带深度的层级顺序（DFS）。 */
+private fun folderTree(
+    folders: List<com.yhx.notices.data.local.dao.FolderWithCount>,
+): List<Pair<com.yhx.notices.data.local.dao.FolderWithCount, Int>> {
+    val byParent = folders.groupBy { it.folder.parentId }
+    val result = ArrayList<Pair<com.yhx.notices.data.local.dao.FolderWithCount, Int>>()
+    fun dfs(parentId: Long?, depth: Int) {
+        byParent[parentId]?.sortedBy { it.folder.sortOrder }?.forEach {
+            result.add(it to depth)
+            dfs(it.folder.id, depth + 1)
+        }
+    }
+    dfs(null, 0)
+    return result
 }
 
 private fun folderName(state: NoteListUiState): String =
