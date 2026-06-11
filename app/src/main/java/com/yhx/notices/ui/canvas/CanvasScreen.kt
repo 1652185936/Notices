@@ -916,7 +916,7 @@ private fun widthFactor(
             0.45f + pressure.coerceIn(0f, 1f) * 1.05f // 真实压感优先
         } else {
             val s = (speedPxPerMs / 2.5f).coerceIn(0f, 1f)
-            1.35f - s * 0.8f // 慢笔粗、快笔细，模拟提按
+            1.45f - s * 0.95f // 慢笔粗、快笔细，模拟提按
         }
     }
     CanvasTool.PENCIL -> {
