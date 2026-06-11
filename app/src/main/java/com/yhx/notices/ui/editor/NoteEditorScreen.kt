@@ -18,9 +18,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Lock
@@ -46,6 +50,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -89,6 +95,7 @@ fun NoteEditorScreen(
 
     val context = androidx.compose.ui.platform.LocalContext.current
     var showSketch by remember { mutableStateOf(false) }
+    var viewerPath by remember { mutableStateOf<String?>(null) }
 
     Box(Modifier.fillMaxSize()) {
     Scaffold(
@@ -212,7 +219,7 @@ fun NoteEditorScreen(
                 )
             }
             items(viewModel.blocks, key = { it.id }) { block ->
-                BlockRenderer(block, viewModel)
+                BlockRenderer(block, viewModel) { p -> viewerPath = p }
             }
         }
     }
@@ -234,6 +241,39 @@ fun NoteEditorScreen(
 
         if (viewModel.isLocked) {
             LockScreen(onUnlock = viewModel::unlock, onBack = onBack)
+        }
+
+        viewerPath?.let { p ->
+            ImageViewerOverlay(path = p, onClose = { viewerPath = null })
+        }
+    }
+}
+
+@Composable
+private fun ImageViewerOverlay(path: String, onClose: () -> Unit) {
+    var scale by remember { mutableStateOf(1f) }
+    var pan by remember { mutableStateOf(Offset.Zero) }
+    val state = rememberTransformableState { zoom, offsetChange, _ ->
+        scale = (scale * zoom).coerceIn(1f, 6f)
+        pan += offsetChange
+    }
+    androidx.compose.material3.Surface(Modifier.fillMaxSize(), color = Color.Black) {
+        Box(Modifier.fillMaxSize()) {
+            AsyncImage(
+                model = path,
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(
+                        scaleX = scale, scaleY = scale,
+                        translationX = pan.x, translationY = pan.y,
+                    )
+                    .transformable(state),
+            )
+            IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopStart)) {
+                Icon(Icons.Default.Close, contentDescription = "关闭", tint = Color.White)
+            }
         }
     }
 }
@@ -311,14 +351,14 @@ private fun RecordingBar(
 }
 
 @Composable
-private fun BlockRenderer(block: Block, vm: NoteEditorViewModel) {
+private fun BlockRenderer(block: Block, vm: NoteEditorViewModel, onViewImage: (String) -> Unit) {
     when (block) {
         is TextBlock -> EditableText(block, vm)
         is ChecklistBlock -> ChecklistRow(block, vm)
-        is ImageBlock -> AttachmentImageView(block.attachmentId, vm)
+        is ImageBlock -> AttachmentImageView(block.attachmentId, vm, onViewImage)
         is DividerBlock -> HorizontalDivider(Modifier.padding(vertical = 12.dp))
         is AudioBlock -> AudioBlockView(block, vm)
-        is SketchBlock -> AttachmentImageView(block.attachmentId, vm)
+        is SketchBlock -> AttachmentImageView(block.attachmentId, vm, onViewImage)
         is TableBlock -> TableView(block, vm)
     }
 }
@@ -431,7 +471,7 @@ private fun ChecklistRow(block: ChecklistBlock, vm: NoteEditorViewModel) {
 }
 
 @Composable
-private fun AttachmentImageView(attachmentId: Long, vm: NoteEditorViewModel) {
+private fun AttachmentImageView(attachmentId: Long, vm: NoteEditorViewModel, onView: (String) -> Unit) {
     var path by remember(attachmentId) { mutableStateOf<String?>(null) }
     LaunchedEffect(attachmentId) { path = vm.attachmentPath(attachmentId) }
     AsyncImage(
@@ -442,7 +482,8 @@ private fun AttachmentImageView(attachmentId: Long, vm: NoteEditorViewModel) {
             .heightIn(max = 280.dp)
             .padding(vertical = 6.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Color(0x08000000)),
+            .background(Color(0x08000000))
+            .clickable { path?.let(onView) },
         contentScale = androidx.compose.ui.layout.ContentScale.Fit,
     )
 }
