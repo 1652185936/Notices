@@ -13,7 +13,7 @@ import kotlinx.serialization.json.Json
 @Serializable
 data class CanvasContent(
     val version: Int = 1,
-    val background: String = "blank",   // blank / grid / lines / dots
+    val background: String = "blank",   // 见 PaperStyles.ALL：blank/grid/lines/dots/cornell/legal/graph/tianzige/staff/cream-dots
     val elements: List<CanvasElement> = emptyList(),
 )
 

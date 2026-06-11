@@ -140,9 +140,11 @@ class ExportManager @Inject constructor(
         val scale = if (maxOf(w, h) > maxDim) maxDim / maxOf(w, h) else 1f
         val bmp = Bitmap.createBitmap((w * scale).toInt(), (h * scale).toInt(), Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
-        canvas.drawColor(Color.WHITE)
+        canvas.drawColor(com.yhx.notices.domain.canvas.PaperStyles.paperBaseColor(content.background))
         canvas.scale(scale, scale)
         canvas.translate(-minX + m, -minY + m)
+        // 世界坐标下绘制底纹（与屏幕端 drawCanvasBackground 一致），可见世界区 [minX-m..maxX+m]
+        drawCanvasBackgroundNative(canvas, content.background, minX - m, minY - m, maxX + m, maxY + m)
         content.elements.forEach { el ->
             when (el) {
                 is StrokeElement -> {
@@ -176,6 +178,73 @@ class ExportManager @Inject constructor(
             }
         }
         bmp
+    }
+
+    /** 世界坐标下绘制纸张底纹（与 CanvasScreen.drawCanvasBackground 一致），导出所见即所得。 */
+    private fun drawCanvasBackgroundNative(
+        canvas: Canvas, style: String, x0: Float, y0: Float, x1: Float, y1: Float,
+    ) {
+        if (style == "blank") return
+        val P = com.yhx.notices.domain.canvas.PaperStyles
+        val line = Paint().apply { color = P.LINE; isAntiAlias = true; strokeWidth = 1f }
+        val major = Paint().apply { color = P.LINE_MAJOR; isAntiAlias = true; strokeWidth = 1f }
+        val margin = Paint().apply { color = P.MARGIN_RED; isAntiAlias = true; strokeWidth = 1.5f }
+        val dot = Paint().apply { color = P.LINE; isAntiAlias = true; style = Paint.Style.FILL }
+        val sp = P.BASE_SPACING
+        val big = P.GRID_SPACING
+
+        fun firstAtOrAfter(coord: Float, step: Float): Float =
+            Math.ceil((coord / step).toDouble()).toFloat() * step
+        fun hLines(step: Float, p: Paint, lx0: Float = x0, lx1: Float = x1) {
+            var y = firstAtOrAfter(y0, step); while (y <= y1) { canvas.drawLine(lx0, y, lx1, y, p); y += step }
+        }
+        fun vLines(step: Float, p: Paint, ly0: Float = y0, ly1: Float = y1) {
+            var x = firstAtOrAfter(x0, step); while (x <= x1) { canvas.drawLine(x, ly0, x, ly1, p); x += step }
+        }
+
+        when (style) {
+            "grid" -> { hLines(sp, line); vLines(sp, line) }
+            "lines" -> hLines(sp, line)
+            "cornell" -> { hLines(sp, line); vLines(sp * 5f, major) }
+            "dots", "cream-dots" -> {
+                var y = firstAtOrAfter(y0, sp)
+                while (y <= y1) {
+                    var x = firstAtOrAfter(x0, sp)
+                    while (x <= x1) { canvas.drawCircle(x, y, 2f, dot); x += sp }
+                    y += sp
+                }
+            }
+            "legal" -> {
+                hLines(sp, line)
+                vLines(big, margin)  // 每 96 一条暖色竖边距线（无限画布无单页概念）
+            }
+            "graph" -> {
+                hLines(sp, line); vLines(sp, line)
+                hLines(big, major); vLines(big, major)
+            }
+            "tianzige" -> {
+                hLines(big, line); vLines(big, line)
+                val dash = Paint().apply {
+                    color = (P.MARGIN_RED and 0x00FFFFFF) or 0x30000000
+                    isAntiAlias = true; strokeWidth = 1f
+                    pathEffect = android.graphics.DashPathEffect(floatArrayOf(6f, 8f), 0f)
+                }
+                val half = big / 2f
+                var hy = firstAtOrAfter(y0 - half, big) + half
+                while (hy <= y1) { canvas.drawLine(x0, hy, x1, hy, dash); hy += big }
+                var vx = firstAtOrAfter(x0 - half, big) + half
+                while (vx <= x1) { canvas.drawLine(vx, y0, vx, y1, dash); vx += big }
+            }
+            "staff" -> {
+                val ln = P.STAFF_LINE
+                val group = ln * 4f + P.STAFF_GROUP_GAP
+                var top = firstAtOrAfter(y0, group) - group
+                while (top <= y1) {
+                    for (k in 0..4) { val y = top + k * ln; if (y in y0..y1) canvas.drawLine(x0, y, x1, y, line) }
+                    top += group
+                }
+            }
+        }
     }
 
     // ---------- 输出 ----------

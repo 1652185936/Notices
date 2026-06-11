@@ -859,7 +859,7 @@ fun CanvasScreen(
             androidx.compose.ui.graphics.Canvas(bmp),
             androidx.compose.ui.geometry.Size(canvasSize.width.toFloat(), canvasSize.height.toFloat()),
         ) {
-            drawRect(Color.White)
+            drawRect(Color(com.yhx.notices.domain.canvas.PaperStyles.paperBaseColor(viewModel.background)))
             drawCommittedWorld(
                 viewModel.elements.toList(), bitmaps, viewModel.background,
                 offset, scale, editingId, inkCache, pendingErase,
@@ -943,7 +943,7 @@ fun CanvasScreen(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .background(Color.White)
+                .background(Color(com.yhx.notices.domain.canvas.PaperStyles.paperBaseColor(viewModel.background)))
                 .onSizeChanged { canvasSize = it }
                 .pointerInput(tool, palmBlock) {
                     when (tool) {
@@ -1538,32 +1538,86 @@ private fun EraserPanel(
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCanvasBackground(
     style: String, offset: Offset, scale: Float,
 ) {
+    // 先铺纸张底色（暖纸样式非白），保证与导出一致
+    val base = com.yhx.notices.domain.canvas.PaperStyles.paperBaseColor(style)
+    if (base != 0xFFFFFFFF.toInt()) drawRect(Color(base))
     if (style == "blank") return
-    val lineColor = Color(0x14000000)
-    val spacing = 48f * scale
-    if (spacing < 8f) return
+    val lineColor = Color(com.yhx.notices.domain.canvas.PaperStyles.LINE)
+    val majorColor = Color(com.yhx.notices.domain.canvas.PaperStyles.LINE_MAJOR)
+    val marginColor = Color(com.yhx.notices.domain.canvas.PaperStyles.MARGIN_RED)
+    val sp = com.yhx.notices.domain.canvas.PaperStyles.BASE_SPACING * scale  // 世界 48 → 屏幕
+    val big = com.yhx.notices.domain.canvas.PaperStyles.GRID_SPACING * scale  // 世界 96 → 屏幕
+    if (sp < 8f) return
+    // 世界点 wx → 屏幕 offset.x + wx*scale；下列 hLines/vLines 以世界为锚无限平铺
+    fun hLines(step: Float, color: Color, w: Float = 1f, x0: Float = 0f, x1: Float = size.width) {
+        var y = offset.y.mod(step); while (y < size.height) { drawLine(color, Offset(x0, y), Offset(x1, y), w); y += step }
+    }
+    fun vLines(step: Float, color: Color, w: Float = 1f, y0: Float = 0f, y1: Float = size.height) {
+        var x = offset.x.mod(step); while (x < size.width) { drawLine(color, Offset(x, y0), Offset(x, y1), w); x += step }
+    }
     when (style) {
-        "grid", "lines" -> {
-            var y = offset.y.mod(spacing)
+        "grid" -> { hLines(sp, lineColor); vLines(sp, lineColor) }
+        "lines" -> hLines(sp, lineColor)
+        "cornell" -> {
+            // 康奈尔：主体横线 + 左侧竖向「线索栏」分隔线（无界画布以大间隔平铺竖线）
+            hLines(sp, lineColor)
+            val col = sp * 5f  // 线索栏宽 ~5 行
+            var x = offset.x.mod(col)
+            while (x < size.width) { drawLine(majorColor, Offset(x, 0f), Offset(x, size.height), 1.2f); x += col }
+        }
+        "dots", "cream-dots" -> {
+            var y = offset.y.mod(sp)
             while (y < size.height) {
-                drawLine(lineColor, Offset(0f, y), Offset(size.width, y), 1f); y += spacing
+                var x = offset.x.mod(sp)
+                while (x < size.width) { drawCircle(lineColor, 2f, Offset(x, y)); x += sp }
+                y += sp
             }
-            if (style == "grid") {
-                var x = offset.x.mod(spacing)
-                while (x < size.width) {
-                    drawLine(lineColor, Offset(x, 0f), Offset(x, size.height), 1f); x += spacing
+        }
+        "legal" -> {
+            hLines(sp, lineColor)
+            // 左侧淡红竖边距线：世界 x = 0 处一条（随平移），落于内容左缘
+            val mx = offset.x.mod(big)  // 用 96 间距其实只想要一条，但无限画布无单页概念 → 每 big 一条
+            var x = mx; while (x < size.width) { drawLine(marginColor, Offset(x, 0f), Offset(x, size.height), 1.5f); x += big }
+        }
+        "graph" -> {
+            // 主次网格：细格 48、主格 96 略深
+            hLines(sp, lineColor); vLines(sp, lineColor)
+            if (big >= 8f) { hLines(big, majorColor); vLines(big, majorColor) }
+        }
+        "tianzige" -> {
+            // 田字格：96 外框 + 内部十字虚线（虚线落在每格中心，半格偏移）
+            hLines(big, lineColor); vLines(big, lineColor)
+            val half = big / 2f  // big 已是屏幕间距
+            val dashColor = marginColor.copy(alpha = 0.18f)
+            drawDashedH(offset.y + half, big, dashColor)
+            drawDashedV(offset.x + half, big, dashColor)
+        }
+        "staff" -> {
+            val line = com.yhx.notices.domain.canvas.PaperStyles.STAFF_LINE * scale
+            val gap = com.yhx.notices.domain.canvas.PaperStyles.STAFF_GROUP_GAP * scale
+            val group = line * 4f + gap  // 一组 5 线（4 间隔）+ 组间距
+            if (group >= 12f) {
+                var top = offset.y.mod(group)
+                while (top < size.height + group) {
+                    for (k in 0..4) {
+                        val y = top + k * line
+                        if (y >= 0f && y < size.height) drawLine(lineColor, Offset(0f, y), Offset(size.width, y), 1f)
+                    }
+                    top += group
                 }
             }
         }
-        "dots" -> {
-            var y = offset.y.mod(spacing)
-            while (y < size.height) {
-                var x = offset.x.mod(spacing)
-                while (x < size.width) { drawCircle(lineColor, 2f, Offset(x, y)); x += spacing }
-                y += spacing
-            }
-        }
     }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawDashedH(start: Float, step: Float, color: Color) {
+    val effect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6f, 8f), 0f)
+    var y = start.mod(step); while (y < size.height) { drawLine(color, Offset(0f, y), Offset(size.width, y), 1f, pathEffect = effect); y += step }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawDashedV(start: Float, step: Float, color: Color) {
+    val effect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6f, 8f), 0f)
+    var x = start.mod(step); while (x < size.width) { drawLine(color, Offset(x, 0f), Offset(x, size.height), 1f, pathEffect = effect); x += step }
 }
 
 /** 基底层渲染快照参数：任一字段变化即重烘焙。 */
@@ -1942,11 +1996,17 @@ private fun HwCanvasTopBar(
                 Box {
                     HwToolIcon(HwIcons.Paper, "纸张样式", c) { paperOpen = true }
                     DropdownMenu(paperOpen, { paperOpen = false }) {
-                        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
-                            PaperOption("blank", "空白", background, c) { onBackground(it); paperOpen = false }
-                            PaperOption("grid", "网格", background, c) { onBackground(it); paperOpen = false }
-                            PaperOption("lines", "横线", background, c) { onBackground(it); paperOpen = false }
-                            PaperOption("dots", "点阵", background, c) { onBackground(it); paperOpen = false }
+                        Row(
+                            Modifier
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                        ) {
+                            com.yhx.notices.domain.canvas.PaperStyles.ALL.forEach { st ->
+                                PaperOption(
+                                    st, com.yhx.notices.domain.canvas.PaperStyles.paperLabel(st),
+                                    background, c,
+                                ) { onBackground(it); paperOpen = false }
+                            }
                         }
                     }
                 }
@@ -2129,7 +2189,7 @@ private fun PaperOption(style: String, label: String, current: String, c: HwBarC
             Modifier
                 .size(44.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color.White)
+                .background(Color(com.yhx.notices.domain.canvas.PaperStyles.paperBaseColor(style)))
                 .border(
                     width = if (selected) 2.dp else 1.dp,
                     color = if (selected) Color(0xFF007DFF) else Color(0x1F000000),
@@ -2138,6 +2198,8 @@ private fun PaperOption(style: String, label: String, current: String, c: HwBarC
         ) {
             Canvas(Modifier.fillMaxSize()) {
                 val lc = Color(0x2E000000)
+                val major = Color(0x40000000)
+                val red = Color(com.yhx.notices.domain.canvas.PaperStyles.MARGIN_RED)
                 val sp = size.width / 4.5f
                 when (style) {
                     "grid" -> {
@@ -2147,12 +2209,49 @@ private fun PaperOption(style: String, label: String, current: String, c: HwBarC
                     "lines" -> {
                         var y = sp; while (y < size.height) { drawLine(lc, Offset(3f, y), Offset(size.width - 3f, y), 1f); y += sp }
                     }
-                    "dots" -> {
+                    "dots", "cream-dots" -> {
                         var y = sp
                         while (y < size.height) {
                             var x = sp
                             while (x < size.width) { drawCircle(lc, 1.6f, Offset(x, y)); x += sp }
                             y += sp
+                        }
+                    }
+                    "cornell" -> {
+                        // 左竖线 + 顶/底横线 + 主体横线
+                        val cx = size.width * 0.32f
+                        drawLine(lc, Offset(cx, size.height * 0.18f), Offset(cx, size.height * 0.82f), 1.2f)
+                        drawLine(lc, Offset(0f, size.height * 0.18f), Offset(size.width, size.height * 0.18f), 1.2f)
+                        drawLine(lc, Offset(0f, size.height * 0.82f), Offset(size.width, size.height * 0.82f), 1.2f)
+                        var y = size.height * 0.18f + sp
+                        while (y < size.height * 0.82f) { drawLine(lc.copy(alpha = 0.5f), Offset(cx + 2f, y), Offset(size.width, y), 0.8f); y += sp }
+                    }
+                    "legal" -> {
+                        drawLine(red, Offset(size.width * 0.26f, 0f), Offset(size.width * 0.26f, size.height), 1.2f)
+                        var y = sp; while (y < size.height) { drawLine(lc, Offset(0f, y), Offset(size.width, y), 1f); y += sp }
+                    }
+                    "graph" -> {
+                        var x = sp; while (x < size.width) { drawLine(lc, Offset(x, 0f), Offset(x, size.height), 0.8f); x += sp }
+                        var y = sp; while (y < size.height) { drawLine(lc, Offset(0f, y), Offset(size.width, y), 0.8f); y += sp }
+                        val bg = sp * 2.5f
+                        var mx = bg; while (mx < size.width) { drawLine(major, Offset(mx, 0f), Offset(mx, size.height), 1.1f); mx += bg }
+                        var my = bg; while (my < size.height) { drawLine(major, Offset(0f, my), Offset(size.width, my), 1.1f); my += bg }
+                    }
+                    "tianzige" -> {
+                        val g = size.width / 2f
+                        var x = g; while (x < size.width) { drawLine(lc, Offset(x, 0f), Offset(x, size.height), 1f); x += g }
+                        var y = g; while (y < size.height) { drawLine(lc, Offset(0f, y), Offset(size.width, y), 1f); y += g }
+                        val effect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(3f, 3f), 0f)
+                        drawLine(red.copy(alpha = 0.4f), Offset(g / 2f, 0f), Offset(g / 2f, size.height), 0.8f, pathEffect = effect)
+                        drawLine(red.copy(alpha = 0.4f), Offset(g * 1.5f, 0f), Offset(g * 1.5f, size.height), 0.8f, pathEffect = effect)
+                        drawLine(red.copy(alpha = 0.4f), Offset(0f, g / 2f), Offset(size.width, g / 2f), 0.8f, pathEffect = effect)
+                        drawLine(red.copy(alpha = 0.4f), Offset(0f, g * 1.5f), Offset(size.width, g * 1.5f), 0.8f, pathEffect = effect)
+                    }
+                    "staff" -> {
+                        val ln = size.height / 14f
+                        for (group in 0..1) {
+                            val top = size.height * (if (group == 0) 0.18f else 0.58f)
+                            for (k in 0..4) { val y = top + k * ln; drawLine(lc, Offset(2f, y), Offset(size.width - 2f, y), 0.9f) }
                         }
                     }
                 }
