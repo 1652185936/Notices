@@ -32,6 +32,10 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { prefs.setTheme(mode) }
     }
 
+    fun setAppLock(enabled: Boolean) {
+        viewModelScope.launch { prefs.setAppLock(enabled) }
+    }
+
     fun export(uri: Uri) {
         viewModelScope.launch {
             backupManager.export(uri)

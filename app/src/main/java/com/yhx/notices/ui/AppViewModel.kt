@@ -1,5 +1,8 @@
 package com.yhx.notices.ui
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.yhx.notices.data.repository.ThemeMode
@@ -22,8 +25,16 @@ class AppViewModel @Inject constructor(
         .map { it.theme }
         .stateIn(viewModelScope, SharingStarted.Eagerly, ThemeMode.SYSTEM)
 
+    val appLock: StateFlow<Boolean> = prefs.settings
+        .map { it.appLock }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    var unlocked by mutableStateOf(false)
+        private set
+
+    fun markUnlocked() { unlocked = true }
+
     init {
-        // 启动时重建未来提醒（弥补进程被杀/系统重启），见 docs/06 §3
         viewModelScope.launch { runCatching { scheduler.rescheduleActive() } }
     }
 }

@@ -79,6 +79,18 @@ fun SettingsScreen(
                 }
             }
             HorizontalDivider()
+            SectionTitle("隐私")
+            androidx.compose.foundation.layout.Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("应用锁（指纹/系统密码）", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                androidx.compose.material3.Switch(
+                    checked = settings.appLock,
+                    onCheckedChange = { viewModel.setAppLock(it) },
+                )
+            }
+            HorizontalDivider()
             SectionTitle("数据")
             SettingRow("回收站", onOpenTrash)
             SettingRow("导出备份（.zip）") {

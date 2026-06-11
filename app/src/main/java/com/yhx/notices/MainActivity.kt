@@ -37,8 +37,13 @@ class MainActivity : FragmentActivity() {
                 }
             }
 
+            val appLock by appViewModel.appLock.collectAsStateWithLifecycle()
             NoticesTheme(themeMode = theme) {
-                NoticesNavHost()
+                if (appLock && !appViewModel.unlocked) {
+                    com.yhx.notices.ui.security.AppLockGate(onUnlock = appViewModel::markUnlocked)
+                } else {
+                    NoticesNavHost()
+                }
             }
         }
     }
