@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -154,6 +155,43 @@ fun CanvasScreen(
                     }
                     IconButton(onClick = viewModel::undo, enabled = viewModel.canUndo) {
                         Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "撤销")
+                    }
+                    var menuOpen by remember { mutableStateOf(false) }
+                    val ctx = androidx.compose.ui.platform.LocalContext.current
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "更多")
+                    }
+                    androidx.compose.material3.DropdownMenu(menuOpen, { menuOpen = false }) {
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("分享为图片") },
+                            onClick = {
+                                menuOpen = false
+                                viewModel.shareAsImage { uri ->
+                                    uri?.let { com.yhx.notices.ui.editor.shareUri(ctx, it, "image/png") }
+                                }
+                            },
+                        )
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("导出图片到相册") },
+                            onClick = {
+                                menuOpen = false
+                                viewModel.exportImageToGallery { ok ->
+                                    android.widget.Toast.makeText(
+                                        ctx, if (ok) "已保存到相册" else "导出失败",
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            },
+                        )
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("导出 PDF") },
+                            onClick = {
+                                menuOpen = false
+                                viewModel.exportPdf { uri ->
+                                    uri?.let { com.yhx.notices.ui.editor.shareUri(ctx, it, "application/pdf") }
+                                }
+                            },
+                        )
                     }
                 },
             )

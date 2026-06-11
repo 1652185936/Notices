@@ -9,6 +9,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.yhx.notices.data.export.ExportManager
 import com.yhx.notices.data.repository.AttachmentRepository
 import com.yhx.notices.data.repository.NoteRepository
 import com.yhx.notices.domain.canvas.CanvasContent
@@ -27,6 +28,7 @@ class CanvasViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val noteRepo: NoteRepository,
     private val attachmentRepo: AttachmentRepository,
+    private val exportManager: ExportManager,
 ) : ViewModel() {
 
     val noteId: Long = savedStateHandle.get<String>("noteId")?.toLongOrNull() ?: -1L
@@ -128,6 +130,34 @@ class CanvasViewModel @Inject constructor(
     }
 
     suspend fun attachmentPath(id: Long): String? = attachmentRepo.resolvePath(id)?.absolutePath
+
+    private fun exportName() = (title.ifBlank { "无界笔记" }) + "_" + System.currentTimeMillis()
+
+    private fun content() = CanvasContent(background = background, elements = elements.toList())
+
+    fun exportImageToGallery(onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            ensureSaved()
+            val bmp = exportManager.renderCanvas(content())
+            onDone(exportManager.saveToGallery(bmp, exportName()) != null)
+        }
+    }
+
+    fun shareAsImage(onUri: (android.net.Uri?) -> Unit) {
+        viewModelScope.launch {
+            ensureSaved()
+            val bmp = exportManager.renderCanvas(content())
+            onUri(exportManager.shareImage(bmp, exportName()))
+        }
+    }
+
+    fun exportPdf(onUri: (android.net.Uri?) -> Unit) {
+        viewModelScope.launch {
+            ensureSaved()
+            val bmp = exportManager.renderCanvas(content())
+            onUri(exportManager.bitmapToPdf(bmp, exportName()))
+        }
+    }
 
     private fun imageSize(path: String): Pair<Float, Float> {
         val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }

@@ -87,6 +87,7 @@ fun NoteEditorScreen(
         ActivityResultContracts.RequestPermission()
     ) { granted -> if (granted) viewModel.startRecording() }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
     var showSketch by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize()) {
@@ -125,6 +126,32 @@ fun NoteEditorScreen(
                         androidx.compose.material3.DropdownMenuItem(
                             text = { Text(if (viewModel.encrypted) "解除加密" else "加密") },
                             onClick = { viewModel.toggleEncryption(); menuOpen = false },
+                        )
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("分享为图片") },
+                            onClick = {
+                                menuOpen = false
+                                viewModel.shareAsImage { uri -> uri?.let { shareUri(context, it, "image/png") } }
+                            },
+                        )
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("导出图片到相册") },
+                            onClick = {
+                                menuOpen = false
+                                viewModel.exportImageToGallery { ok ->
+                                    android.widget.Toast.makeText(
+                                        context, if (ok) "已保存到相册" else "导出失败",
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            },
+                        )
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("导出 PDF") },
+                            onClick = {
+                                menuOpen = false
+                                viewModel.exportPdf { uri -> uri?.let { shareUri(context, it, "application/pdf") } }
+                            },
                         )
                         androidx.compose.material3.DropdownMenuItem(
                             text = { Text("删除") },
@@ -513,6 +540,15 @@ private fun listPrefix(block: TextBlock, vm: NoteEditorViewModel): String? = whe
     TextKind.NUMBERED -> "${numberedIndex(block, vm)}.  "
     TextKind.QUOTE -> "丨  "
     else -> null
+}
+
+internal fun shareUri(context: android.content.Context, uri: android.net.Uri, mime: String) {
+    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = mime
+        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(android.content.Intent.createChooser(intent, "分享"))
 }
 
 private fun numberedIndex(block: TextBlock, vm: NoteEditorViewModel): Int {

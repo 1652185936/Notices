@@ -10,6 +10,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.yhx.notices.data.export.ExportManager
 import com.yhx.notices.data.repository.AttachmentRepository
 import com.yhx.notices.data.repository.AudioEngine
 import com.yhx.notices.data.repository.NoteRepository
@@ -38,6 +39,7 @@ class NoteEditorViewModel @Inject constructor(
     private val noteRepo: NoteRepository,
     private val attachmentRepo: AttachmentRepository,
     private val audioEngine: AudioEngine,
+    private val exportManager: ExportManager,
 ) : ViewModel() {
 
     val noteId: Long = savedStateHandle.get<String>("noteId")?.toLongOrNull() ?: -1L
@@ -446,6 +448,34 @@ class NoteEditorViewModel @Inject constructor(
             saveJob?.cancel()
             noteRepo.moveToTrash(listOf(noteId))
             onDone()
+        }
+    }
+
+    // ---------- 导出 / 分享 ----------
+    private fun exportName() =
+        (title.ifBlank { "笔记" }) + "_" + System.currentTimeMillis()
+
+    fun exportImageToGallery(onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            ensureSaved()
+            val bmp = exportManager.renderPaged(title, NoteContent(blocks = blocks.toList()))
+            onDone(exportManager.saveToGallery(bmp, exportName()) != null)
+        }
+    }
+
+    fun shareAsImage(onUri: (android.net.Uri?) -> Unit) {
+        viewModelScope.launch {
+            ensureSaved()
+            val bmp = exportManager.renderPaged(title, NoteContent(blocks = blocks.toList()))
+            onUri(exportManager.shareImage(bmp, exportName()))
+        }
+    }
+
+    fun exportPdf(onUri: (android.net.Uri?) -> Unit) {
+        viewModelScope.launch {
+            ensureSaved()
+            val bmp = exportManager.renderPaged(title, NoteContent(blocks = blocks.toList()))
+            onUri(exportManager.bitmapToPdf(bmp, exportName()))
         }
     }
 
