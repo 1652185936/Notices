@@ -71,10 +71,16 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.yhx.notices.domain.canvas.ImageElement
 import com.yhx.notices.domain.canvas.StrokeElement
 import com.yhx.notices.domain.canvas.TextElement
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 enum class CanvasTool(val label: String) {
-    MOVE("移动"), SELECT("选择"), LASSO("套索"), PEN("钢笔"), PENCIL("铅笔"), HIGHLIGHTER("荧光笔"), ERASER("橡皮"), TEXT("文字")
+    MOVE("移动"), SELECT("选择"), LASSO("套索"), PEN("钢笔"), PENCIL("铅笔"),
+    HIGHLIGHTER("荧光笔"), SHAPE("形状"), ERASER("橡皮"), TEXT("文字")
 }
 
 /** 射线法判断点是否在多边形（扁平 x,y 序列）内。 */
@@ -131,6 +137,66 @@ private fun elementBounds(el: com.yhx.notices.domain.canvas.CanvasElement): Floa
     is ImageElement -> floatArrayOf(el.x, el.y, el.width, el.height)
     is TextElement -> floatArrayOf(el.x, el.y, el.text.length.coerceAtLeast(2) * el.fontSize * 0.6f, el.fontSize * 1.4f)
     else -> null
+}
+
+/** 一笔成形：把手绘笔迹识别为直线/矩形/椭圆，返回规整后的点；无法识别返回 null。 */
+private fun recognizeShape(pts: List<Float>): List<Float>? {
+    if (pts.size < 10) return null
+    val n = pts.size / 2
+    val xs = FloatArray(n) { pts[it * 2] }
+    val ys = FloatArray(n) { pts[it * 2 + 1] }
+    val minX = xs.min(); val maxX = xs.max(); val minY = ys.min(); val maxY = ys.max()
+    val w = maxX - minX; val h = maxY - minY
+    val span = maxOf(w, h)
+    if (span < 24f) return null
+    val x0 = xs[0]; val y0 = ys[0]; val x1 = xs[n - 1]; val y1 = ys[n - 1]
+
+    var maxPerp = 0f
+    for (i in 0 until n) maxPerp = maxOf(maxPerp, perpDist(xs[i], ys[i], x0, y0, x1, y1))
+    val chord = hypot(x1 - x0, y1 - y0)
+    if (chord > span * 0.5f && maxPerp < span * 0.10f) return lineSamples(x0, y0, x1, y1)
+
+    if (hypot(x1 - x0, y1 - y0) > span * 0.30f) return null // 未闭合
+    val cx = (minX + maxX) / 2; val cy = (minY + maxY) / 2
+    val rx = w / 2; val ry = h / 2
+    var ellRes = 0f; var rectRes = 0f
+    for (i in 0 until n) {
+        val nx = (xs[i] - cx) / (rx + 1e-3f); val ny = (ys[i] - cy) / (ry + 1e-3f)
+        ellRes += abs(hypot(nx, ny) - 1f)
+        rectRes += distToRectEdge(xs[i], ys[i], minX, minY, maxX, maxY) / span
+    }
+    ellRes /= n; rectRes /= n
+    return if (ellRes < rectRes) ellipseSamples(cx, cy, rx, ry) else rectSamples(minX, minY, maxX, maxY)
+}
+
+private fun perpDist(px: Float, py: Float, ax: Float, ay: Float, bx: Float, by: Float): Float {
+    val dx = bx - ax; val dy = by - ay; val len = hypot(dx, dy)
+    return if (len < 1e-3f) hypot(px - ax, py - ay) else abs((px - ax) * dy - (py - ay) * dx) / len
+}
+
+private fun distToRectEdge(px: Float, py: Float, minX: Float, minY: Float, maxX: Float, maxY: Float): Float =
+    minOf(abs(px - minX), abs(px - maxX), abs(py - minY), abs(py - maxY))
+
+private fun lineSamples(x0: Float, y0: Float, x1: Float, y1: Float): List<Float> {
+    val out = ArrayList<Float>(); val steps = 16
+    for (i in 0..steps) { val t = i / steps.toFloat(); out.add(x0 + (x1 - x0) * t); out.add(y0 + (y1 - y0) * t) }
+    return out
+}
+
+private fun ellipseSamples(cx: Float, cy: Float, rx: Float, ry: Float): List<Float> {
+    val out = ArrayList<Float>(); val steps = 48
+    for (i in 0..steps) { val a = 2f * PI.toFloat() * i / steps; out.add(cx + rx * cos(a)); out.add(cy + ry * sin(a)) }
+    return out
+}
+
+private fun rectSamples(minX: Float, minY: Float, maxX: Float, maxY: Float): List<Float> {
+    val corners = listOf(minX to minY, maxX to minY, maxX to maxY, minX to maxY, minX to minY)
+    val out = ArrayList<Float>(); val steps = 8
+    for (k in 0 until corners.size - 1) {
+        val (ax, ay) = corners[k]; val (bx, by) = corners[k + 1]
+        for (i in 0..steps) { val t = i / steps.toFloat(); out.add(ax + (bx - ax) * t); out.add(ay + (by - ay) * t) }
+    }
+    return out
 }
 
 private fun hitTest(elements: List<com.yhx.notices.domain.canvas.CanvasElement>, w: Offset): String? {
@@ -311,7 +377,9 @@ fun CanvasScreen(
                         }
                         CanvasTool.TEXT -> detectTapGestures { p ->
                             val w = screenToWorld(p)
-                            editingId = viewModel.addText(w.x, w.y)
+                            val hit = hitTest(viewModel.elements, w)
+                            val hitText = hit?.let { id -> viewModel.elements.firstOrNull { it.id == id } as? TextElement }
+                            editingId = hitText?.id ?: viewModel.addText(w.x, w.y)
                         }
                         CanvasTool.LASSO -> detectDragGestures(
                             onDragStart = { p ->
@@ -364,10 +432,17 @@ fun CanvasScreen(
                                 if (livePoints.size >= 1) {
                                     val flat = ArrayList<Float>(livePoints.size * 2)
                                     livePoints.forEach { flat.add(it.x); flat.add(it.y) }
-                                    if (tool == CanvasTool.ERASER) {
-                                        viewModel.eraseStrokes(flat, 20f / scale)
-                                    } else {
-                                        viewModel.addStroke(
+                                    when (tool) {
+                                        CanvasTool.ERASER -> viewModel.eraseStrokes(flat, 20f / scale)
+                                        CanvasTool.SHAPE -> viewModel.addStroke(
+                                            StrokeElement(
+                                                tool = "pen",
+                                                color = color.toArgb(),
+                                                width = width,
+                                                points = recognizeShape(flat) ?: flat,
+                                            )
+                                        )
+                                        else -> viewModel.addStroke(
                                             StrokeElement(
                                                 tool = tool.name.lowercase(),
                                                 color = strokeColor(tool, color).toArgb(),
