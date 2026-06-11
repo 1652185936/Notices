@@ -19,6 +19,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.text.BasicTextField
@@ -66,6 +68,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.yhx.notices.domain.richtext.AudioBlock
 import com.yhx.notices.domain.richtext.Block
@@ -96,6 +99,8 @@ fun NoteEditorScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
     var showSketch by remember { mutableStateOf(false) }
     var viewerPath by remember { mutableStateOf<String?>(null) }
+    var showTagDialog by remember { mutableStateOf(false) }
+    val allTags by viewModel.allTags.collectAsStateWithLifecycle()
 
     // 语音转文字（系统 SpeechRecognizer）
     val recognizer = remember {
@@ -267,6 +272,24 @@ fun NoteEditorScreen(
                         .padding(vertical = 8.dp),
                 )
             }
+            item(key = "tags") {
+                androidx.compose.foundation.layout.Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    viewModel.tags.forEach { tag ->
+                        androidx.compose.material3.AssistChip(
+                            onClick = { viewModel.removeTag(tag.id) },
+                            label = { Text("# ${tag.name}  ✕") },
+                            modifier = Modifier.padding(end = 6.dp),
+                        )
+                    }
+                    androidx.compose.material3.AssistChip(
+                        onClick = { showTagDialog = true },
+                        label = { Text("+ 标签") },
+                    )
+                }
+            }
             items(viewModel.blocks, key = { it.id }) { block ->
                 BlockRenderer(block, viewModel) { p -> viewerPath = p }
             }
@@ -291,6 +314,16 @@ fun NoteEditorScreen(
 
         if (viewModel.isLocked) {
             LockScreen(onUnlock = viewModel::unlock, onBack = onBack)
+        }
+
+        if (showTagDialog) {
+            TagDialog(
+                allTags = allTags,
+                selectedIds = viewModel.tags.map { it.id }.toSet(),
+                onToggle = { id, selected -> if (selected) viewModel.removeTag(id) else viewModel.addTag(id) },
+                onCreate = { viewModel.createAndAddTag(it) },
+                onDismiss = { showTagDialog = false },
+            )
         }
 
         viewerPath?.let { p ->
@@ -419,6 +452,54 @@ private fun RecordingBar(
             androidx.compose.material3.Button(onClick = onStop) { Text("完成") }
         }
     }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun TagDialog(
+    allTags: List<com.yhx.notices.data.local.entity.TagEntity>,
+    selectedIds: Set<Long>,
+    onToggle: (Long, Boolean) -> Unit,
+    onCreate: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var newTag by remember { mutableStateOf("") }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("标签") },
+        text = {
+            Column {
+                if (allTags.isEmpty()) {
+                    Text("还没有标签，创建一个吧", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                androidx.compose.foundation.layout.FlowRow {
+                    allTags.forEach { tag ->
+                        val sel = tag.id in selectedIds
+                        androidx.compose.material3.FilterChip(
+                            selected = sel,
+                            onClick = { onToggle(tag.id, sel) },
+                            label = { Text(tag.name) },
+                            modifier = Modifier.padding(end = 6.dp),
+                        )
+                    }
+                }
+                androidx.compose.foundation.layout.Row(
+                    Modifier.padding(top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = newTag, onValueChange = { newTag = it },
+                        singleLine = true, label = { Text("新建标签") },
+                        modifier = Modifier.weight(1f),
+                    )
+                    androidx.compose.material3.TextButton(
+                        onClick = { if (newTag.isNotBlank()) { onCreate(newTag.trim()); newTag = "" } },
+                    ) { Text("创建") }
+                }
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("完成") } },
+    )
 }
 
 @Composable

@@ -15,6 +15,7 @@ import com.yhx.notices.data.repository.AttachmentRepository
 import com.yhx.notices.data.repository.AudioEngine
 import com.yhx.notices.data.repository.NoteRepository
 import com.yhx.notices.data.repository.OcrEngine
+import com.yhx.notices.data.repository.TagRepository
 import com.yhx.notices.domain.model.Note
 import com.yhx.notices.domain.richtext.Block
 import com.yhx.notices.domain.richtext.BlockOps
@@ -29,6 +30,7 @@ import com.yhx.notices.domain.richtext.TextKind
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -42,6 +44,7 @@ class NoteEditorViewModel @Inject constructor(
     private val audioEngine: AudioEngine,
     private val exportManager: ExportManager,
     private val ocrEngine: OcrEngine,
+    private val tagRepo: TagRepository,
 ) : ViewModel() {
 
     val noteId: Long = savedStateHandle.get<String>("noteId")?.toLongOrNull() ?: -1L
@@ -87,6 +90,31 @@ class NoteEditorViewModel @Inject constructor(
         }
     }
 
+    val tags = mutableStateListOf<com.yhx.notices.data.local.entity.TagEntity>()
+    val allTags: kotlinx.coroutines.flow.StateFlow<List<com.yhx.notices.data.local.entity.TagEntity>> =
+        tagRepo.observeTags().stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private fun reloadTags() {
+        viewModelScope.launch { tags.clear(); tags.addAll(tagRepo.tagsOfNote(noteId)) }
+    }
+
+    fun addTag(tagId: Long) {
+        viewModelScope.launch { tagRepo.attach(noteId, tagId); reloadTags() }
+    }
+
+    fun removeTag(tagId: Long) {
+        viewModelScope.launch { tagRepo.detach(noteId, tagId); reloadTags() }
+    }
+
+    fun createAndAddTag(name: String) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            val id = tagRepo.create(name.trim(), 0xFF007DFF.toInt())
+            if (id > 0) tagRepo.attach(noteId, id)
+            reloadTags()
+        }
+    }
+
     fun unlock() {
         isLocked = false
         loadContent()
@@ -104,6 +132,7 @@ class NoteEditorViewModel @Inject constructor(
             blocks.clear()
             blocks.addAll(note.content.blocks)
             focusedBlockId = blocks.firstOrNull()?.id
+            reloadTags()
         }
     }
 
