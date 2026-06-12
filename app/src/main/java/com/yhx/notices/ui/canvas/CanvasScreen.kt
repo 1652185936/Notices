@@ -564,11 +564,19 @@ private fun recognizeShape(pts: List<Float>): List<Float>? {
     val x0 = xs[0]; val y0 = ys[0]; val x1 = xs[n - 1]; val y1 = ys[n - 1]
     val closeGap = hypot(x1 - x0, y1 - y0)
 
-    // —— 直线：严格直 + 弦够长。10% 太松会拉直有意曲线，收到 3.5%。
+    // —— 直线：严格直 + 弦够长。10% 太松会拉直有意曲线，收到 3.5%。近水平/垂直自动吸附。
     var maxPerp = 0f
     for (i in 0 until n) maxPerp = maxOf(maxPerp, perpDist(xs[i], ys[i], x0, y0, x1, y1))
     val chord = closeGap
-    if (chord > span * 0.6f && maxPerp < span * 0.035f) return lineSamples(x0, y0, x1, y1)
+    if (chord > span * 0.6f && maxPerp < span * 0.035f) {
+        val deg = ((atan2(y1 - y0, x1 - x0) * 180f / PI.toFloat()) % 360f + 360f) % 360f
+        fun near(a: Float, b: Float) = abs(((a - b + 540f) % 360f) - 180f) < 8f // 夹角差 < 8°
+        return when {
+            near(deg, 0f) || near(deg, 180f) -> { val yy = (y0 + y1) / 2f; lineSamples(x0, yy, x1, yy) }
+            near(deg, 90f) || near(deg, 270f) -> { val xx = (x0 + x1) / 2f; lineSamples(xx, y0, xx, y1) }
+            else -> lineSamples(x0, y0, x1, y1)
+        }
+    }
 
     // —— 箭头：近直线主干 + 末端有明显折返/勾（未闭合）。
     recognizeArrow(xs, ys, span)?.let { return it }
@@ -595,7 +603,16 @@ private fun recognizeShape(pts: List<Float>): List<Float>? {
     // 椭圆 / 矩形取更优者，且必须足够小才接受，否则保留原笔迹。
     val best = minOf(ellRes, rectRes)
     if (best >= 0.16f) return null
-    return if (ellRes < rectRes) ellipseSamples(cx, cy, rx, ry) else rectSamples(minX, minY, maxX, maxY)
+    return if (ellRes < rectRes) {
+        // 近正圆（长短半径接近）吸附为正圆，避免画圆出椭圆
+        val rMax = maxOf(rx, ry); val rMin = minOf(rx, ry)
+        if (rMax > 1e-3f && (rMax - rMin) / rMax < 0.18f) {
+            val r = (rx + ry) / 2f
+            ellipseSamples(cx, cy, r, r)
+        } else {
+            ellipseSamples(cx, cy, rx, ry)
+        }
+    } else rectSamples(minX, minY, maxX, maxY)
 }
 
 /**
@@ -1184,6 +1201,8 @@ fun CanvasScreen(
                                         // 其余书写类笔收笔出锋
                                         val constantWidth = tool == CanvasTool.MARKER
                                         val ws = ArrayList(liveWidths)
+                                        // 先平滑逐点宽消除笔速抖动造成的锯齿边缘
+                                        InkGeometry.smoothWidths(ws)
                                         // 荧光笔保持平头方头，不 taperTail；其余书写类出锋
                                         if (!constantWidth && tool != CanvasTool.HIGHLIGHTER) InkGeometry.taperTail(ws)
                                         viewModel.addStroke(
@@ -1274,6 +1293,7 @@ fun CanvasScreen(
                                 livePoints.forEach { flat.add(it.x); flat.add(it.y) }
                                 val radii = ArrayList<Float>(liveWidths.size)
                                 liveWidths.forEach { radii.add(it / 2f) }
+                                InkGeometry.smoothWidths(radii) // 与落墨一致：平滑边缘消锯齿
                                 drawLiveInk(tool, flat, radii, strokeColor(tool, color, opacity))
                             }
                         }
@@ -1897,7 +1917,7 @@ private fun widthFactor(
 
 private fun strokeColor(tool: CanvasTool, color: Color, opacity: Float = 1f): Color = when (tool) {
     CanvasTool.HIGHLIGHTER -> color.copy(alpha = 0.35f * opacity)
-    CanvasTool.MARKER -> color.copy(alpha = 0.92f * opacity)
+    CanvasTool.MARKER -> color.copy(alpha = opacity) // 马克笔实色不透明
     CanvasTool.ERASER -> Color.White
     else -> color.copy(alpha = opacity)
 }

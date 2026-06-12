@@ -142,6 +142,23 @@ object InkGeometry {
         return baseW * factor
     }
 
+    /**
+     * 逐点笔宽/半径平滑：3 抽头（1-2-1）滑动平均，多趟。
+     * 笔速映射的瞬时宽抖动会让变宽轮廓边缘出现锯齿/毛糙，平滑后边缘干净顺滑。
+     * 保留首末端点（起笔/出锋由 taperTail 单独处理）。
+     */
+    fun smoothWidths(ws: MutableList<Float>, passes: Int = 2) {
+        if (ws.size < 3) return
+        repeat(passes) {
+            var prev = ws[0]
+            for (i in 1 until ws.size - 1) {
+                val cur = ws[i]
+                ws[i] = (prev + cur * 2f + ws[i + 1]) / 4f
+                prev = cur
+            }
+        }
+    }
+
     /** 收笔笔锋：把最后几个半径按比例递减，模拟提笔。 */
     fun taperTail(radii: MutableList<Float>, tailCount: Int = 3) {
         if (radii.size < tailCount + 2) return
